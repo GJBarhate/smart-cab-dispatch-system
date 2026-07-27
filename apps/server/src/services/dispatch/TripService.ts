@@ -24,9 +24,13 @@ export type TripStatusT =
   | 'rejected'
   | 'unassignable';
 
+// `unassignable` is reachable from the two not-yet-started states because the
+// Reoptimizer re-queues a trip whose deadline is already unreachable before
+// the driver has moved (plan.md §8.10 step 3b). It is NOT reachable once a
+// guest has boarded — yanking a boarded guest is worse than being late.
 const ALLOWED_TRANSITIONS: Record<TripStatusT, TripStatusT[]> = {
-  pending_driver: ['accepted', 'rejected', 'cancelled'],
-  accepted: ['en_route_pickup', 'cancelled'],
+  pending_driver: ['accepted', 'rejected', 'cancelled', 'unassignable'],
+  accepted: ['en_route_pickup', 'cancelled', 'unassignable'],
   en_route_pickup: ['at_pickup', 'cancelled'],
   at_pickup: ['boarded', 'cancelled'],
   boarded: ['completed', 'cancelled'],

@@ -83,7 +83,7 @@ export const Reoptimizer = {
           const guestIds = trip.guests.map((g) => g.guestId.toString());
           await TripService.requeueGuests(guestIds, 'deadline_at_risk_before_start');
           await TripService.releaseDriver(trip.driverId.toString());
-          await Trip.updateOne({ _id: trip._id }, { $set: { status: 'unassignable' } });
+          await TripService.transition(trip._id.toString(), 'unassignable', 'reoptimizer');
           report.requeued++;
         } else {
           report.deadlineAlerts++;

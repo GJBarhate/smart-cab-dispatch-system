@@ -78,4 +78,32 @@ describe('Trip state machine', () => {
     const cancelled = await TripService.transition(trip._id.toString(), 'cancelled', 'test');
     expect(cancelled.status).toBe('cancelled');
   });
+
+  // The Reoptimizer re-queues a doomed trip that hasn't started yet
+  // (plan.md §8.10 step 3b) — that transition must be legal through the
+  // state machine, not something the engine writes around it.
+  it('allows unassignable from not-yet-started states', async () => {
+    const { driver } = await makeDriver();
+    const { guest } = await makeGuest();
+
+    const fromPending = await makeTrip(driver._id.toString(), guest._id.toString());
+    expect((await TripService.transition(fromPending._id.toString(), 'unassignable', 'reoptimizer')).status).toBe('unassignable');
+
+    const fromAccepted = await makeTrip(driver._id.toString(), guest._id.toString());
+    await TripService.transition(fromAccepted._id.toString(), 'accepted', 'test');
+    expect((await TripService.transition(fromAccepted._id.toString(), 'unassignable', 'reoptimizer')).status).toBe('unassignable');
+  });
+
+  it('refuses to yank a boarded guest into unassignable', async () => {
+    const { driver } = await makeDriver();
+    const { guest } = await makeGuest();
+    const trip = await makeTrip(driver._id.toString(), guest._id.toString());
+
+    await TripService.transition(trip._id.toString(), 'accepted', 'test');
+    await TripService.transition(trip._id.toString(), 'en_route_pickup', 'test');
+    await TripService.transition(trip._id.toString(), 'at_pickup', 'test');
+    await TripService.transition(trip._id.toString(), 'boarded', 'test');
+
+    await expect(TripService.transition(trip._id.toString(), 'unassignable', 'reoptimizer')).rejects.toMatchObject({ status: 409 });
+  });
 });

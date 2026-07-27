@@ -151,7 +151,11 @@ async function expireStaleOffers(offerTimeoutSec: number, now: Date): Promise<vo
     const guestIds = trip.guests.map((g: any) => g.guestId.toString());
     await TripService.requeueGuests(guestIds, 'offer_expired');
     if (trip.driverId) await TripService.releaseDriver(trip.driverId.toString());
-    await Trip.updateOne({ _id: trip._id }, { $set: { status: 'rejected', rejectionReason: 'offer_expired', rejectedAt: now } });
+    // Through the state machine, not a raw updateOne — TripService is the
+    // single authority on trip.status (plan.md §6.2). It stamps rejectedAt.
+    const rejected = await TripService.transition(trip._id.toString(), 'rejected', 'engine:offer_expired');
+    rejected.rejectionReason = 'offer_expired';
+    await rejected.save();
   }
 }
 

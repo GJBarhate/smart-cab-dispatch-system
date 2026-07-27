@@ -483,12 +483,15 @@ adminRouter.post(
   '/trips/:id/cancel',
   validate({ body: cancelSchema }),
   asyncHandler(async (req, res) => {
-    const trip = await Trip.findById(req.params.id);
-    if (!trip) throw new NotFoundError('Trip');
+    const existing = await Trip.findById(req.params.id);
+    if (!existing) throw new NotFoundError('Trip');
 
-    trip.status = 'cancelled';
+    // Route handlers never set trip.status directly (plan.md §6.2) — go
+    // through the state machine so an invalid transition (e.g. cancelling an
+    // already-completed trip) surfaces as a 409 instead of silently
+    // corrupting the trip.
+    const trip = await TripService.transition(req.params.id, 'cancelled', req.user!.sub);
     trip.cancellationReason = req.body.reason;
-    trip.cancelledAt = new Date();
     trip.timeline.push({ at: new Date(), type: 'cancelled', actor: req.user!.sub, payload: { reason: req.body.reason } });
     await trip.save();
 
