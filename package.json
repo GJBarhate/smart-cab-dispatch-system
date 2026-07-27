@@ -10,8 +10,8 @@
     "dev:guest": "npm run dev -w guest",
     "dev:admin": "npm run dev -w admin",
     "build": "npm run sync && npm run build -w server && npm run build -w guest && npm run build -w admin",
-    "seed": "npm run seed -w server",
-    "simulate": "npm run simulate -w server",
+    "seed": "npm run seed -w server --",
+    "simulate": "npm run simulate -w server --",
     "test": "npm run sync && npm run test -w server",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "npm run sync && npm run typecheck -w server && npm run typecheck -w guest && npm run typecheck -w admin"
