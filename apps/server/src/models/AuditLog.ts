@@ -1,4 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { getModel } from './_shared';
 
 const auditLogSchema = new Schema(
   {
@@ -19,4 +20,4 @@ auditLogSchema.index({ at: -1 });
 auditLogSchema.index({ entityType: 1, entityId: 1 });
 
 export type AuditLogDoc = InferSchemaType<typeof auditLogSchema> & { _id: Types.ObjectId };
-export const AuditLog = model('AuditLog', auditLogSchema);
+export const AuditLog = getModel('AuditLog', auditLogSchema);

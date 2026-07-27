@@ -1,5 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions, geoPointSchema } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, geoPointSchema, getModel } from './_shared';
 
 const stopSchema = new Schema(
   {
@@ -128,4 +128,4 @@ tripSchema.index({ createdAt: -1 });
 tripSchema.index({ code: 1 }, { unique: true });
 
 export type TripDoc = InferSchemaType<typeof tripSchema> & { _id: Types.ObjectId };
-export const Trip = model('Trip', tripSchema);
+export const Trip = getModel('Trip', tripSchema);

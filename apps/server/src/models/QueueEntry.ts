@@ -1,5 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions, geoPointSchema } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, geoPointSchema, getModel } from './_shared';
 
 const queueEntrySchema = new Schema(
   {
@@ -44,4 +44,4 @@ queueEntrySchema.index({ deadlineAt: 1 });
 queueEntrySchema.index({ 'pickup.coordinates': '2dsphere' });
 
 export type QueueEntryDoc = InferSchemaType<typeof queueEntrySchema> & { _id: Types.ObjectId };
-export const QueueEntry = model('QueueEntry', queueEntrySchema);
+export const QueueEntry = getModel('QueueEntry', queueEntrySchema);

@@ -1,5 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions, geoPointSchema } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, geoPointSchema, getModel } from './_shared';
 
 const rideRequestSchema = new Schema(
   {
@@ -37,4 +37,4 @@ rideRequestSchema.index({ guestId: 1, status: 1 });
 rideRequestSchema.index({ status: 1, requestedAt: 1 });
 
 export type RideRequestDoc = InferSchemaType<typeof rideRequestSchema> & { _id: Types.ObjectId };
-export const RideRequest = model('RideRequest', rideRequestSchema);
+export const RideRequest = getModel('RideRequest', rideRequestSchema);

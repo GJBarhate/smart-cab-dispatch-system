@@ -1,5 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, getModel } from './_shared';
 
 const userSchema = new Schema(
   {
@@ -19,4 +19,4 @@ userSchema.index({ email: 1 }, { unique: true, sparse: true });
 userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 
 export type UserDoc = InferSchemaType<typeof userSchema> & { _id: Types.ObjectId };
-export const User = model('User', userSchema);
+export const User = getModel('User', userSchema);

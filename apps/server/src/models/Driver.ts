@@ -1,5 +1,19 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions, geoPointSchema } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, geoPointSchema, getModel } from './_shared';
+
+// A real Schema instance (not a bare object) — `vehicle` has a sibling field
+// literally named `type`, which Mongoose's TS type inference (InferSchemaType)
+// confuses with its own "type key" shorthand unless this is a proper Schema,
+// same issue geoPointSchema in _shared.ts already works around.
+const vehicleSchema = new Schema(
+  {
+    number: { type: String, required: true, uppercase: true, trim: true },
+    model: { type: String, default: '' },
+    colour: { type: String, default: '' },
+    type: { type: String, enum: ['sedan', 'suv', 'tempo', 'bus'], required: true }
+  },
+  { _id: false }
+);
 
 const driverSchema = new Schema(
   {
@@ -7,12 +21,7 @@ const driverSchema = new Schema(
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
     licenseNo: { type: String, default: '' },
-    vehicle: {
-      number: { type: String, required: true, uppercase: true, trim: true },
-      model: { type: String, default: '' },
-      colour: { type: String, default: '' },
-      type: { type: String, enum: ['sedan', 'suv', 'tempo', 'bus'], required: true }
-    },
+    vehicle: { type: vehicleSchema, required: true },
     capacity: {
       seats: { type: Number, required: true, min: 1 },
       luggage: { type: Number, required: true, min: 0 }
@@ -58,4 +67,4 @@ driverSchema.index({ status: 1, predictedFreeAt: 1 });
 driverSchema.index({ 'vehicle.number': 1 }, { unique: true });
 
 export type DriverDoc = InferSchemaType<typeof driverSchema> & { _id: Types.ObjectId };
-export const Driver = model('Driver', driverSchema);
+export const Driver = getModel('Driver', driverSchema);

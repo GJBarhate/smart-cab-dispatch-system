@@ -1,5 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, getModel } from './_shared';
 
 const eventConfigSchema = new Schema(
   {
@@ -75,4 +75,4 @@ const eventConfigSchema = new Schema(
 );
 
 export type EventConfigDoc = InferSchemaType<typeof eventConfigSchema> & { _id: Types.ObjectId };
-export const EventConfig = model('EventConfig', eventConfigSchema);
+export const EventConfig = getModel('EventConfig', eventConfigSchema);

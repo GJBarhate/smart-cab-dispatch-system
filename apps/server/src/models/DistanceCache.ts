@@ -1,4 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { getModel } from './_shared';
 
 const distanceCacheSchema = new Schema(
   {
@@ -16,4 +17,4 @@ distanceCacheSchema.index({ key: 1 }, { unique: true });
 distanceCacheSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export type DistanceCacheDoc = InferSchemaType<typeof distanceCacheSchema> & { _id: Types.ObjectId };
-export const DistanceCache = model('DistanceCache', distanceCacheSchema);
+export const DistanceCache = getModel('DistanceCache', distanceCacheSchema);

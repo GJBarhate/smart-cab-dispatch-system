@@ -1,5 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, getModel } from './_shared';
 
 const guestSchema = new Schema(
   {
@@ -50,4 +50,4 @@ guestSchema.index({ bookingRef: 1 }, { unique: true });
 guestSchema.index({ status: 1, 'arrival.scheduledAt': 1 });
 
 export type GuestDoc = InferSchemaType<typeof guestSchema> & { _id: Types.ObjectId };
-export const Guest = model('Guest', guestSchema);
+export const Guest = getModel('Guest', guestSchema);

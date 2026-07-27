@@ -1,5 +1,5 @@
-import { Schema, model, Types, InferSchemaType } from 'mongoose';
-import { baseSchemaOptions, geoPointSchema } from './_shared';
+import { Schema, Types, InferSchemaType } from 'mongoose';
+import { baseSchemaOptions, geoPointSchema, getModel } from './_shared';
 
 const locationSchema = new Schema(
   {
@@ -21,4 +21,4 @@ const locationSchema = new Schema(
 locationSchema.index({ coordinates: '2dsphere' });
 
 export type LocationDoc = InferSchemaType<typeof locationSchema> & { _id: Types.ObjectId };
-export const Location = model('Location', locationSchema);
+export const Location = getModel('Location', locationSchema);
