@@ -54,8 +54,8 @@ Aim for 6–8 minutes. Have three browser windows ready before you hit record: g
       (`npm test -w server`) to prove this is enforced server-side, not
       just hidden in the UI.
 
-5:45  Terminal: `npm run simulate -- --drivers 60 --guests 250 --burst 90
-      --minutes 20 --speed 30x` — let the report print, highlight the
+5:45  Terminal: `npm run simulate` (defaults already match the 60-driver,
+      250-guest peak scenario) — let the report print, highlight the
       assertions all passing and the routing cache hit rate.
 
 6:30  Trade-offs slide (from DESIGN.md §12), thank you.

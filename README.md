@@ -66,22 +66,32 @@ npm i
 # Server env — edit MONGODB_URI to your own Atlas cluster
 cp .env.example apps/server/.env
 
-npm run seed        # prints a credentials table — keep it handy
+npm run seed         # idempotent — fills in what's missing, prints a credentials table
 npm run dev          # server :4000, guest :5173, admin :5174
 ```
 
 `apps/guest/.env` and `apps/admin/.env` already point at `http://localhost:4000` for local dev — no changes needed unless you move the backend port.
+
+To wipe and re-seed from scratch:
+```bash
+npm run seed:fresh
+```
+> **Windows/PowerShell note:** `npm run <script> -- <args>` does not reliably forward the trailing args through a workspace script on some npm/PowerShell combinations (confirmed on npm 10.9.2 + PowerShell — works fine in Git Bash). That's why `--fresh` is its own dedicated script (`seed:fresh`) rather than a forwarded flag. If you ever need to pass ad-hoc CLI args to a workspace script and `--` isn't forwarding, run it directly instead: `cd apps/server && npx tsx <script> <args>`.
 
 Run the test suite (unit + integration, `mongodb-memory-server`, no external dependency):
 ```bash
 npm test -w server
 ```
 
-Run the peak-arrival load test (boots the real server in-process and drives it over real HTTP — see `apps/server/src/sim/simulate.ts`):
+Run the peak-arrival load test (boots the real server in-process and drives it over real HTTP — see `apps/server/src/sim/simulate.ts`). The defaults already match the scenario below, so no arguments are needed:
 ```bash
-npm run simulate -- --drivers 60 --guests 250 --burst 90 --minutes 20 --speed 30x
+npm run simulate
 ```
-**This wipes and re-seeds the Driver/Guest/Trip/QueueEntry collections** — re-run `npm run seed -- --fresh` afterward to restore the demo dataset before recording anything.
+To run it at a different scale, invoke it directly (see the Windows note above):
+```bash
+cd apps/server && npx tsx src/sim/simulate.ts --drivers 60 --guests 250 --burst 90 --minutes 20 --speed 30x
+```
+**Either form wipes and re-seeds the Driver/Guest/Trip/QueueEntry/Alert collections** — run `npm run seed:fresh` afterward to restore the demo dataset before recording anything.
 
 ---
 
@@ -93,7 +103,7 @@ Three strategies per tick, in order of least to most disruptive: **detour insert
 
 ## Peak-arrival simulation report
 
-Run against the real backend (real Express + Socket.IO process, real MongoDB Atlas, real driver accept/reject/board/drop over real HTTP) — `npm run simulate -- --drivers 60 --guests 250 --burst 90 --minutes 20 --speed 30x`:
+Run against the real backend (real Express + Socket.IO process, real MongoDB Atlas, real driver accept/reject/board/drop over real HTTP) — `npm run simulate` (defaults already match this scenario):
 
 ```
 ── PEAK ARRIVAL SIMULATION REPORT ──────────────────────

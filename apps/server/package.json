@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "seed": "tsx src/seed/seed.ts",
+    "seed:fresh": "tsx src/seed/seed.ts --fresh",
     "simulate": "tsx src/sim/simulate.ts",
     "test": "vitest run",
     "test:watch": "vitest"
