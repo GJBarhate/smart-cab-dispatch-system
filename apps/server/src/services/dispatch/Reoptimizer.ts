@@ -3,11 +3,11 @@
 // boarded guest is never re-optimized away from — yanking a boarded guest is
 // worse than being late, so only the DEADLINE_AT_RISK alert path applies once
 // a trip has boarded passengers.
-import { v4 as uuidv4 } from 'uuid';
 import { Trip } from '../../models/Trip';
 import { Driver } from '../../models/Driver';
 import { RoutingService } from '../routing/RoutingService';
 import { NotificationService } from '../NotificationService';
+import { AlertService } from '../AlertService';
 import { toLatLng } from '../../utils/geo';
 import { minutesBetween } from '../../utils/time';
 import { TripService } from './TripService';
@@ -89,12 +89,9 @@ export const Reoptimizer = {
           report.deadlineAlerts++;
         }
 
-        NotificationService.adminAlert({
-          id: uuidv4(),
-          level: 'warning',
-          code: 'DEADLINE_AT_RISK',
-          message: `Trip ${trip.code} is projected ${slipMin}min past its deadline`,
-          entity: { type: 'Trip', id: trip._id.toString() }
+        await AlertService.raise('warning', 'DEADLINE_AT_RISK', `Trip ${trip.code} is projected ${slipMin}min past its deadline`, {
+          type: 'Trip',
+          id: trip._id.toString()
         });
       }
     }

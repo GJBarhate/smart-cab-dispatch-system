@@ -2,7 +2,6 @@
 // strategies in order — detour insertion (reuses a driver already moving,
 // zero new deadhead), batch Hungarian (globally optimal for what's left),
 // greedy (stragglers) — each cheaper and less disruptive than the next.
-import { v4 as uuidv4 } from 'uuid';
 import { EventConfig } from '../../models/EventConfig';
 import { QueueEntry } from '../../models/QueueEntry';
 import { Trip } from '../../models/Trip';
@@ -12,6 +11,7 @@ import { toGeoPoint, toLatLng, haversineKm } from '../../utils/geo';
 import { minutesBetween } from '../../utils/time';
 import { RoutingService } from '../routing/RoutingService';
 import { NotificationService } from '../NotificationService';
+import { AlertService } from '../AlertService';
 import { toDispatchConfig } from './config';
 import { acquireTickLock, releaseTickLock } from './TickLock';
 import { DriverStateService } from './DriverStateService';
@@ -144,7 +144,9 @@ async function expireStaleOffers(offerTimeoutSec: number, now: Date): Promise<vo
 }
 
 function raiseAlert(level: 'info' | 'warning' | 'critical', code: string, message: string): void {
-  NotificationService.adminAlert({ id: uuidv4(), level, code, message });
+  AlertService.raise(level, code, message).catch(() => {
+    // Best-effort — an alert failing to persist must never abort a tick.
+  });
 }
 
 async function buildGuestLineItems(guestIds: string[]): Promise<Array<{ guestId: string; name: string; seats: number; luggage: number }>> {
@@ -408,5 +410,80 @@ export const DispatchEngine = {
 
     await commitAssignment(result.driver, demand, { demand, sourceEntryIds: [entry._id.toString()], groupSplitId: null }, strategy, result.score, result.breakdown, 1);
     return true;
+  },
+
+  /**
+   * Dry run of steps 2-7 of tick() — clusters demand, builds the real cost
+   * matrix, and solves it, but commits nothing. Powers the admin Dispatch
+   * Console's "Preview batch" heatmap (plan.md §9.5, §12.2).
+   */
+  async previewBatch(): Promise<{
+    drivers: Array<{ id: string; name: string }>;
+    demands: Array<{ id: string; guestIds: string[]; seats: number; luggage: number }>;
+    costMatrix: number[][];
+    chosenPairs: Array<{ driverIndex: number; demandIndex: number; cost: number; breakdown: CostBreakdown }>;
+  }> {
+    const cfgDoc = await EventConfig.findOne({ singleton: 'singleton' });
+    if (!cfgDoc) return { drivers: [], demands: [], costMatrix: [], chosenPairs: [] };
+
+    const cfg = toDispatchConfig(cfgDoc);
+    const now = new Date();
+
+    const entryDocs = await QueueEntry.find({ status: 'waiting' }).sort({ priorityScore: -1 }).limit(200);
+    const eligible = await DriverStateService.listEligibleDrivers(cfg, now);
+    if (entryDocs.length === 0 || eligible.length === 0) {
+      return { drivers: eligible.map((e) => ({ id: e.plain.id, name: e.doc.name })), demands: [], costMatrix: [], chosenPairs: [] };
+    }
+
+    const maxFleetSeats = Math.max(...eligible.map((e) => e.plain.capacitySeats));
+    const maxFleetLuggage = Math.max(...eligible.map((e) => e.plain.capacityLuggage));
+
+    const entryById = new Map(entryDocs.map((e) => [e._id.toString(), e]));
+    const clusterableEntries = entryDocs.map((e) => toClusterableEntry(e, now));
+    const clusters = Clusterer.build(
+      clusterableEntries,
+      {
+        maxSharedGuestsPerTrip: cfg.maxSharedGuestsPerTrip,
+        clusterRadiusM: cfg.clusterRadiusM,
+        clusterTimeWindowMin: cfg.clusterTimeWindowMin,
+        maxVehicleSeats: maxFleetSeats,
+        maxVehicleLuggage: maxFleetLuggage
+      },
+      now
+    );
+    const pendingDemands = clusters.flatMap((c) => expandCluster(c, entryById, maxFleetSeats, maxFleetLuggage, now));
+
+    const { durations } = await RoutingService.matrix(
+      eligible.map((e) => e.plain.predictedFreeLocation),
+      pendingDemands.map((p) => p.demand.pickup)
+    );
+
+    const costMatrix: number[][] = eligible.map((driver, i) =>
+      pendingDemands.map((p, j) => {
+        const pickupEtaMin = (durations[i]?.[j] ?? Infinity) / 60;
+        const estimatedTripEndAt = new Date(
+          now.getTime() + (pickupEtaMin + SERVICE_TIME_MIN + roughTripMinutes(p.demand.pickup, p.demand.dropoff)) * 60_000
+        );
+        const feasibility = Feasibility.check(driver.plain, p.demand, { now, pickupEtaMin, estimatedTripEndAt }, cfg);
+        if (!feasibility.ok) return BIG_M;
+        const arrivalAt = new Date(now.getTime() + pickupEtaMin * 60_000);
+        return CostFunction.score(driver.plain, p.demand, { now, pickupEtaMin, arrivalAt }, cfg).total;
+      })
+    );
+
+    const pairs = BatchAssigner.solve(costMatrix);
+    const chosenPairs = pairs.map(({ driverIndex, demandIndex }) => {
+      const pickupEtaMin = (durations[driverIndex]?.[demandIndex] ?? 0) / 60;
+      const arrivalAt = new Date(now.getTime() + pickupEtaMin * 60_000);
+      const { total, breakdown } = CostFunction.score(eligible[driverIndex].plain, pendingDemands[demandIndex].demand, { now, pickupEtaMin, arrivalAt }, cfg);
+      return { driverIndex, demandIndex, cost: total, breakdown };
+    });
+
+    return {
+      drivers: eligible.map((e) => ({ id: e.plain.id, name: e.doc.name })),
+      demands: pendingDemands.map((p) => ({ id: p.demand.id, guestIds: p.sourceEntryIds, seats: p.demand.seats, luggage: p.demand.luggage })),
+      costMatrix,
+      chosenPairs
+    };
   }
 };

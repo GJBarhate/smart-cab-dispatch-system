@@ -9,3 +9,4 @@ export * from './DistanceCache';
 export * from './EventConfig';
 export * from './AuditLog';
 export * from './Lock';
+export * from './Alert';
