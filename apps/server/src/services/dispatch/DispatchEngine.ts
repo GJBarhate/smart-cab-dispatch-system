@@ -31,6 +31,18 @@ import type { CostBreakdown, DispatchConfig, DispatchDemand } from './types';
 const SERVICE_TIME_MIN = 3;
 const AVG_SPEED_KMPH = 30;
 const ROAD_FACTOR = 1.4;
+const GREEDY_SWEEP_CONCURRENCY = 10;
+
+async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      await fn(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+}
 
 export interface TickReport {
   skipped?: string;
@@ -283,8 +295,18 @@ export const DispatchEngine = {
             stillWaiting.push(entry);
             continue;
           }
-          await insertDetour(entry, insertion, now);
-          matched++;
+          try {
+            await insertDetour(entry, insertion, now);
+            matched++;
+          } catch (err) {
+            // Most likely a Mongoose VersionError: the driver accepted/
+            // arrived/boarded/dropped this same trip between findBest()
+            // scoring it and this save (optimistic concurrency, not a bug
+            // to prevent with heavier locking — just retry via the next
+            // tick or another matching path).
+            void err;
+            stillWaiting.push(entry);
+          }
         }
       } else {
         stillWaiting.push(...entryDocs);
@@ -345,8 +367,15 @@ export const DispatchEngine = {
       const pairs = BatchAssigner.solve(cost);
       const resolvedEntryIds = new Set<string>();
 
-      for (const { driverIndex, demandIndex } of pairs) {
-        if (cost[driverIndex][demandIndex] >= BIG_M) continue;
+      // Each pair touches a distinct driver (Hungarian never reuses a row),
+      // so these commits are independent and safe to run concurrently —
+      // trip codes come from an atomic counter (Counter.nextSequence) and
+      // driver claims are an atomic findOneAndUpdate, so there's no race to
+      // guard against here, only the sequential-Atlas-round-trip cost to
+      // avoid (dozens of commits at 100-300ms each adds up to a very slow
+      // tick otherwise).
+      const feasiblePairs = pairs.filter(({ driverIndex, demandIndex }) => cost[driverIndex][demandIndex] < BIG_M);
+      await mapWithConcurrency(feasiblePairs, GREEDY_SWEEP_CONCURRENCY, async ({ driverIndex, demandIndex }) => {
         const driver = eligible[driverIndex];
         const pending = pendingDemands[demandIndex];
         const pickupEtaMin = (durations[driverIndex]?.[demandIndex] ?? 0) / 60;
@@ -356,25 +385,39 @@ export const DispatchEngine = {
         await commitAssignment(driver.doc, pending.demand, pending, 'batch_hungarian', total, breakdown, pendingDemands.length);
         matched++;
         pending.sourceEntryIds.forEach((id) => resolvedEntryIds.add(id));
-      }
+      });
 
       // --- 8. Greedy sweep for anything still unmatched ---
+      // Each demand's Driver.find + matrix + commit is independent of the
+      // others, so this runs with bounded concurrency rather than fully
+      // sequentially — with dozens of leftover demands after a burst, doing
+      // this one at a time turned a single tick into a multi-minute stall
+      // (each iteration pays a real Atlas round trip). TripService.claimDriver
+      // is still an atomic findOneAndUpdate, so concurrent iterations can
+      // never double-assign a driver — a lost race just fails that one
+      // demand's commit, which is caught below and simply retried next tick.
       const stillUnmatched = pendingDemands.filter((p) => !p.sourceEntryIds.every((id) => resolvedEntryIds.has(id)));
       let unassignable = 0;
-      for (const pending of stillUnmatched) {
-        const result = await GreedyMatcher.findBest(pending.demand, cfg, now);
-        if (result) {
-          await commitAssignment(result.driver, pending.demand, pending, 'greedy_realtime', result.score, result.breakdown, 1);
-          matched++;
-          pending.sourceEntryIds.forEach((id) => resolvedEntryIds.add(id));
-        } else {
-          unassignable++;
-          await QueueEntry.updateMany(
-            { _id: { $in: pending.sourceEntryIds } },
-            { $inc: { attempts: 1 }, $set: { lastAttemptAt: now, lastFailureReason: 'no_feasible_driver' } }
-          );
+      await mapWithConcurrency(stillUnmatched, GREEDY_SWEEP_CONCURRENCY, async (pending) => {
+        try {
+          const result = await GreedyMatcher.findBest(pending.demand, cfg, now);
+          if (result) {
+            await commitAssignment(result.driver, pending.demand, pending, 'greedy_realtime', result.score, result.breakdown, 1);
+            matched++;
+            pending.sourceEntryIds.forEach((id) => resolvedEntryIds.add(id));
+            return;
+          }
+        } catch (err) {
+          // Most likely a claimDriver race lost to a concurrent iteration —
+          // treat it the same as "no feasible driver this tick".
+          void err;
         }
-      }
+        unassignable++;
+        await QueueEntry.updateMany(
+          { _id: { $in: pending.sourceEntryIds } },
+          { $inc: { attempts: 1 }, $set: { lastAttemptAt: now, lastFailureReason: 'no_feasible_driver' } }
+        );
+      });
 
       if (unassignable > 0) {
         raiseAlert('warning', 'UNASSIGNABLE', `${unassignable} demand(s) could not be matched this tick`);

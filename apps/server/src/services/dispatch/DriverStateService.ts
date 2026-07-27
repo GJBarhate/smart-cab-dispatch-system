@@ -17,38 +17,45 @@ export const DriverStateService = {
   async refreshPredictedFreeState(): Promise<void> {
     const busyDrivers = await Driver.find({ status: { $in: BUSY_STATUSES }, currentTripId: { $ne: null } });
 
-    for (const driver of busyDrivers) {
-      const trip = await Trip.findById(driver.currentTripId).lean();
-      if (!trip) continue;
+    // Each driver's own stop chain must stay sequential (each leg's origin is
+    // the previous stop), but different drivers are independent — running
+    // them concurrently keeps one tick from paying N x (network latency)
+    // when there are N busy drivers, which matters a lot given OSRM's public
+    // demo server has no SLA (plan.md §16.26).
+    await Promise.all(
+      busyDrivers.map(async (driver) => {
+        const trip = await Trip.findById(driver.currentTripId).lean();
+        if (!trip) return;
 
-      const pendingStops = trip.stops.filter((s) => s.status !== 'done').sort((a, b) => a.seq - b.seq);
-      if (pendingStops.length === 0) {
+        const pendingStops = trip.stops.filter((s) => s.status !== 'done').sort((a, b) => a.seq - b.seq);
+        if (pendingStops.length === 0) {
+          await Driver.updateOne(
+            { _id: driver._id },
+            { $set: { predictedFreeAt: new Date(), predictedFreeLocation: driver.currentLocation } }
+          );
+          return;
+        }
+
+        let cursor = toLatLng(driver.currentLocation as any);
+        let cumulativeSeconds = 0;
+        for (const stop of pendingStops) {
+          const dest = toLatLng(stop.coordinates as any);
+          const { durationSeconds } = await RoutingService.eta(cursor, dest);
+          cumulativeSeconds += durationSeconds + STOP_SERVICE_TIME_SEC;
+          cursor = dest;
+        }
+
         await Driver.updateOne(
           { _id: driver._id },
-          { $set: { predictedFreeAt: new Date(), predictedFreeLocation: driver.currentLocation } }
-        );
-        continue;
-      }
-
-      let cursor = toLatLng(driver.currentLocation as any);
-      let cumulativeSeconds = 0;
-      for (const stop of pendingStops) {
-        const dest = toLatLng(stop.coordinates as any);
-        const { durationSeconds } = await RoutingService.eta(cursor, dest);
-        cumulativeSeconds += durationSeconds + STOP_SERVICE_TIME_SEC;
-        cursor = dest;
-      }
-
-      await Driver.updateOne(
-        { _id: driver._id },
-        {
-          $set: {
-            predictedFreeAt: new Date(Date.now() + cumulativeSeconds * 1000),
-            predictedFreeLocation: toGeoPoint(cursor)
+          {
+            $set: {
+              predictedFreeAt: new Date(Date.now() + cumulativeSeconds * 1000),
+              predictedFreeLocation: toGeoPoint(cursor)
+            }
           }
-        }
-      );
-    }
+        );
+      })
+    );
   },
 
   /** Idle drivers eligible to receive a new trip within the tick's batch horizon. */

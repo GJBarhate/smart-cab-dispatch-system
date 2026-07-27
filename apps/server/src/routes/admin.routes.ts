@@ -454,7 +454,7 @@ adminRouter.post(
     const oldDriverId = trip.driverId?.toString();
     if (oldDriverId) await TripService.releaseDriver(oldDriverId);
 
-    const claimed = await TripService.claimDriver(req.body.driverId);
+    const claimed = await TripService.claimDriver(req.body.driverId, trip._id);
     if (!claimed) throw new ConflictError('Target driver is already on a trip');
 
     trip.driverId = newDriver._id;
@@ -462,7 +462,6 @@ adminRouter.post(
     trip.assignmentMeta = { ...trip.assignmentMeta, strategy: 'manual_override', decidedBy: req.user!.sub, decidedAt: new Date() } as any;
     trip.timeline.push({ at: new Date(), type: 'reassigned', actor: req.user!.sub, payload: { from: oldDriverId, to: req.body.driverId } });
     await trip.save();
-    await Driver.updateOne({ _id: newDriver._id }, { $set: { currentTripId: trip._id } });
 
     await audit(req, 'trip.reassign', 'Trip', trip._id.toString(), { driverId: oldDriverId }, { driverId: req.body.driverId });
 

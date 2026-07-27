@@ -2,7 +2,7 @@
 // POST /api/admin/alerts/:id/ack (§9.4) — NotificationService.adminAlert only
 // emits a socket event, which a client connected later would never see.
 import { Schema, Types, InferSchemaType } from 'mongoose';
-import { getModel } from './_shared';
+import { baseSchemaOptions, getModel } from './_shared';
 
 // Real Schema instance — `entity` has a sibling field literally named `type`,
 // which collides with Mongoose's own "type key" shorthand otherwise (same
@@ -25,7 +25,7 @@ const alertSchema = new Schema(
     acknowledgedBy: { type: Schema.Types.ObjectId, default: null },
     acknowledgedAt: { type: Date, default: null }
   },
-  { timestamps: true, versionKey: false }
+  baseSchemaOptions
 );
 
 alertSchema.index({ acknowledged: 1, createdAt: -1 });

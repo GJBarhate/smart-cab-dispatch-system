@@ -145,7 +145,7 @@ export const Clusterer = {
 
     const firstPass: ClusterableEntry[][] = [];
     for (const bucket of groups.values()) {
-      let clusters: ClusterableEntry[][] = [];
+      const clusters: ClusterableEntry[][] = [];
       for (const entry of bucket) {
         let placed = false;
         for (const cluster of clusters) {

@@ -20,6 +20,19 @@ function guestId(req: { user?: { guestId?: string } }): string {
   return id;
 }
 
+// Read-only, structured location list so the guest app's "Request a ride" screen
+// can offer a picker (venue / airport / station / other accommodations) instead
+// of letting a guest free-type coordinates. No dispatch/matching code is touched.
+guestRouter.get(
+  '/locations',
+  asyncHandler(async (_req, res) => {
+    const locations = await Location.find({ isActive: true })
+      .select('name type address coordinates')
+      .sort({ type: 1, name: 1 });
+    res.json({ ok: true, data: locations });
+  })
+);
+
 guestRouter.get(
   '/me',
   asyncHandler(async (req, res) => {
@@ -137,6 +150,9 @@ guestRouter.delete(
 
     request.status = 'expired';
     await request.save();
+    // The guest's status was flipped to 'queued' when the request was
+    // raised (POST /requests) — revert it now that nothing is pending.
+    await Guest.updateOne({ _id: guestId(req), status: 'queued' }, { $set: { status: 'registered' } });
     res.json({ ok: true, data: request });
   })
 );

@@ -1,5 +1,5 @@
 import { Schema, Types, InferSchemaType } from 'mongoose';
-import { getModel } from './_shared';
+import { getModel, idOnlySchemaOptions } from './_shared';
 
 const auditLogSchema = new Schema(
   {
@@ -13,7 +13,7 @@ const auditLogSchema = new Schema(
     at: { type: Date, default: () => new Date() },
     ip: { type: String, default: '' }
   },
-  { versionKey: false }
+  idOnlySchemaOptions
 );
 
 auditLogSchema.index({ at: -1 });

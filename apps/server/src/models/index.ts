@@ -10,3 +10,4 @@ export * from './EventConfig';
 export * from './AuditLog';
 export * from './Lock';
 export * from './Alert';
+export * from './Counter';

@@ -2,10 +2,12 @@
 // module allowed to mutate `trip.status` — route handlers and the engine
 // both go through here, so an invalid transition always surfaces as a 409
 // instead of a silently corrupted trip.
+import { Types } from 'mongoose';
 import { Trip } from '../../models/Trip';
 import { Driver } from '../../models/Driver';
 import { Guest } from '../../models/Guest';
 import { QueueEntry } from '../../models/QueueEntry';
+import { nextSequence } from '../../models/Counter';
 import { ConflictError, NotFoundError } from '../../utils/errors';
 import { toGeoPoint } from '../../utils/geo';
 import type { LatLng } from '../../utils/geo';
@@ -70,8 +72,8 @@ export interface CreateTripInput {
 }
 
 async function nextTripCode(): Promise<string> {
-  const count = await Trip.countDocuments({});
-  return `T-${String(count + 1).padStart(4, '0')}`;
+  const seq = await nextSequence('trip');
+  return `T-${String(seq).padStart(4, '0')}`;
 }
 
 export const TripService = {
@@ -93,72 +95,89 @@ export const TripService = {
     return trip;
   },
 
-  /** Atomically claims a driver for a new trip. Returns null if someone else beat us to it (§16.21/16.13). */
-  async claimDriver(driverId: string): Promise<boolean> {
+  /**
+   * Atomically claims a driver for `tripId`. Returns false if someone else
+   * beat us to it (§16.21/16.13). `currentTripId` must be set in this SAME
+   * findOneAndUpdate as `status` — splitting it into a later, separate write
+   * (as an earlier version of this function did) leaves a window where the
+   * driver looks claimed (status: 'assigned') but currentTripId is still
+   * null, so a second concurrent claim can slip through and double-assign
+   * the driver. The caller must mint `tripId` before the Trip document
+   * exists (`new Types.ObjectId()`) so it's available to claim with.
+   */
+  async claimDriver(driverId: string, tripId: Types.ObjectId | string): Promise<boolean> {
     const result = await Driver.findOneAndUpdate(
       { _id: driverId, currentTripId: null },
-      { $set: { status: 'assigned' } },
+      { $set: { status: 'assigned', currentTripId: tripId } },
       { new: true }
     );
     return result !== null;
   },
 
   async createFromAssignment(input: CreateTripInput): Promise<InstanceType<typeof Trip>> {
-    const claimed = await TripService.claimDriver(input.driverId);
+    const tripId = new Types.ObjectId();
+    const claimed = await TripService.claimDriver(input.driverId, tripId);
     if (!claimed) throw new ConflictError('Driver was assigned by another process');
 
-    const code = await nextTripCode();
-    const stops = input.stops.map((s, i) => ({
-      seq: i,
-      kind: s.kind,
-      guestIds: s.guestIds,
-      locationId: s.locationId,
-      coordinates: toGeoPoint(s.coordinates),
-      label: s.label,
-      plannedAt: s.plannedAt ?? null,
-      status: 'pending' as const
-    }));
+    try {
+      const code = await nextTripCode();
+      const stops = input.stops.map((s, i) => ({
+        seq: i,
+        kind: s.kind,
+        guestIds: s.guestIds,
+        locationId: s.locationId,
+        coordinates: toGeoPoint(s.coordinates),
+        label: s.label,
+        plannedAt: s.plannedAt ?? null,
+        status: 'pending' as const
+      }));
 
-    const trip = await Trip.create({
-      code,
-      type: input.type,
-      status: 'pending_driver',
-      driverId: input.driverId,
-      vehicleSnapshot: input.vehicleSnapshot,
-      guests: input.guests,
-      stops,
-      capacityUsed: input.capacityUsed,
-      deadlineAt: input.deadlineAt,
-      assignmentMeta: {
-        strategy: input.strategy,
-        score: input.score,
-        costBreakdown: input.costBreakdown,
-        candidatesConsidered: input.candidatesConsidered,
-        decidedAt: new Date(),
-        decidedBy: input.decidedBy
-      },
-      groupSplitId: input.groupSplitId ?? null,
-      sourceRequestId: input.sourceRequestId ?? null,
-      offeredAt: new Date(),
-      timeline: [{ at: new Date(), type: 'created', actor: input.decidedBy, payload: { strategy: input.strategy } }]
-    });
+      const trip = await Trip.create({
+        _id: tripId,
+        code,
+        type: input.type,
+        status: 'pending_driver',
+        driverId: input.driverId,
+        vehicleSnapshot: input.vehicleSnapshot,
+        guests: input.guests,
+        stops,
+        capacityUsed: input.capacityUsed,
+        deadlineAt: input.deadlineAt,
+        assignmentMeta: {
+          strategy: input.strategy,
+          score: input.score,
+          costBreakdown: input.costBreakdown,
+          candidatesConsidered: input.candidatesConsidered,
+          decidedAt: new Date(),
+          decidedBy: input.decidedBy
+        },
+        groupSplitId: input.groupSplitId ?? null,
+        sourceRequestId: input.sourceRequestId ?? null,
+        offeredAt: new Date(),
+        timeline: [{ at: new Date(), type: 'created', actor: input.decidedBy, payload: { strategy: input.strategy } }]
+      });
 
-    await Driver.updateOne({ _id: input.driverId }, { $set: { currentTripId: trip._id } });
+      const guestIds = input.guests.map((g) => g.guestId);
+      await Guest.updateMany(
+        { _id: { $in: guestIds } },
+        { $set: { status: 'assigned', currentTripId: trip._id } }
+      );
 
-    const guestIds = input.guests.map((g) => g.guestId);
-    await Guest.updateMany(
-      { _id: { $in: guestIds } },
-      { $set: { status: 'assigned', currentTripId: trip._id } }
-    );
+      if (input.entryIds.length > 0) {
+        await QueueEntry.updateMany({ _id: { $in: input.entryIds } }, { $set: { status: 'assigned' } });
+      }
 
-    if (input.entryIds.length > 0) {
-      await QueueEntry.updateMany({ _id: { $in: input.entryIds } }, { $set: { status: 'assigned' } });
+      return trip;
+    } catch (err) {
+      // Trip creation failed after the driver was already claimed — release
+      // them rather than leaving currentTripId pointing at a trip that was
+      // never actually created.
+      await TripService.releaseDriver(input.driverId);
+      throw err;
     }
-
-    return trip;
   },
 
-  async requeueGuests(guestIds: string[], reason: string): Promise<void> {
+  async requeueGuests(guestIds: string[], _reason: string): Promise<void> {
     await Guest.updateMany(
       { _id: { $in: guestIds } },
       { $set: { status: 'queued', currentTripId: null, waitingSince: new Date() } }

@@ -14,17 +14,26 @@ export function getModel<S extends Schema>(name: string, schema: S): Model<Infer
 // an explicit `SchemaOptions` annotation here would widen it and silently
 // turn every model's inferred document type into the raw schema-definition
 // shape (e.g. `passwordHash: { type: StringConstructor }` instead of `string`).
+const idToJSON = {
+  virtuals: true,
+  versionKey: false,
+  transform: (_doc: unknown, ret: Record<string, any>) => {
+    ret.id = ret._id?.toString();
+    delete ret._id;
+    return ret;
+  }
+};
+
 export const baseSchemaOptions = {
   timestamps: true,
-  toJSON: {
-    virtuals: true,
-    versionKey: false,
-    transform: (_doc: unknown, ret: Record<string, any>) => {
-      ret.id = ret._id?.toString();
-      delete ret._id;
-      return ret;
-    }
-  }
+  toJSON: idToJSON
+} satisfies SchemaOptions;
+
+// Same `_id` -> `id` transform as baseSchemaOptions, without `timestamps` —
+// for the handful of models (AuditLog) that manage their own timestamp
+// field and would otherwise get redundant createdAt/updatedAt columns.
+export const idOnlySchemaOptions = {
+  toJSON: idToJSON
 } satisfies SchemaOptions;
 
 // A real Schema instance (not a bare object) so Mongoose doesn't confuse the
