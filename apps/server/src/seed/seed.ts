@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { connectDb, disconnectDb } from '../config/db';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
-import { User, Driver, Guest, Location, EventConfig, DistanceCache, AuditLog, Trip, RideRequest, QueueEntry, Lock } from '../models';
+import { User, Driver, Guest, Location, EventConfig, DistanceCache, AuditLog, Trip, RideRequest, QueueEntry, Lock, Alert, Counter } from '../models';
 import { RoutingService } from '../services/routing/RoutingService';
 import { DistanceCacheService } from '../services/routing/DistanceCacheService';
 import { toLatLng, toGeoPoint } from '../utils/geo';
@@ -54,7 +54,9 @@ async function dropAll(): Promise<void> {
     Trip.deleteMany({}),
     RideRequest.deleteMany({}),
     QueueEntry.deleteMany({}),
-    Lock.deleteMany({})
+    Lock.deleteMany({}),
+    Alert.deleteMany({}),
+    Counter.deleteMany({})
   ]);
 }
 
