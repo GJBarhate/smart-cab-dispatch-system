@@ -1,0 +1,289 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Minus, Plus, Send } from 'lucide-react';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { ListSkeleton } from '../components/ui/Skeleton';
+import { ErrorState } from '../components/ui/ErrorState';
+import { RequestStepper } from '../components/RequestStepper';
+import { useGuestLocations, useGuestMe, usePendingRequest, useTripCurrent, guestKeys } from '../hooks/useGuestQueries';
+import { useActiveRequestStore } from '../store/activeRequestStore';
+import { useSocketEvent } from '../hooks/useSocket';
+import { guestApi } from '../api/guest';
+import { ApiError } from '../api/client';
+import type { LocationLite } from '../types/domain';
+
+const LOCATION_TYPE_LABEL: Record<string, string> = {
+  airport: 'Airports',
+  railway_station: 'Railway stations',
+  venue: 'Venue',
+  accommodation: 'Accommodations',
+  custom: 'Other'
+};
+
+function groupByType(locations: LocationLite[]): Array<[string, LocationLite[]]> {
+  const groups = new Map<string, LocationLite[]>();
+  for (const loc of locations) {
+    const list = groups.get(loc.type) ?? [];
+    list.push(loc);
+    groups.set(loc.type, list);
+  }
+  return Array.from(groups.entries());
+}
+
+function Stepper({ value, onChange, min, max, label }: { value: number; onChange: (v: number) => void; min: number; max: number; label: string }): JSX.Element {
+  return (
+    <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3">
+      <span className="text-sm font-medium text-gray-700">{label}</span>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(min, value - 1))}
+          disabled={value <= min}
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-600 shadow disabled:opacity-40"
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <span className="w-6 text-center text-lg font-bold text-gray-900">{value}</span>
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(max, value + 1))}
+          disabled={value >= max}
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-600 shadow disabled:opacity-40"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function Request(): JSX.Element {
+  const activeRequestId = useActiveRequestStore((s) => s.requestId);
+  const setActiveRequestId = useActiveRequestStore((s) => s.setRequestId);
+  const queryClient = useQueryClient();
+
+  const pendingQuery = usePendingRequest(activeRequestId);
+  const { data: guest } = useGuestMe();
+  const { data: tripResp } = useTripCurrent();
+
+  useSocketEvent(
+    'request:status',
+    useCallback(() => {
+      if (activeRequestId) queryClient.invalidateQueries({ queryKey: guestKeys.request(activeRequestId) });
+      queryClient.invalidateQueries({ queryKey: guestKeys.me });
+      queryClient.invalidateQueries({ queryKey: guestKeys.tripCurrent });
+    }, [activeRequestId, queryClient])
+  );
+  useSocketEvent(
+    'trip:assigned',
+    useCallback(() => {
+      queryClient.invalidateQueries({ queryKey: guestKeys.tripCurrent });
+      if (activeRequestId) queryClient.invalidateQueries({ queryKey: guestKeys.request(activeRequestId) });
+    }, [activeRequestId, queryClient])
+  );
+  useSocketEvent('trip:status', useCallback(() => queryClient.invalidateQueries({ queryKey: guestKeys.tripCurrent }), [queryClient]));
+
+  const [cancelling, setCancelling] = useState(false);
+
+  async function handleCancel() {
+    if (!activeRequestId) return;
+    setCancelling(true);
+    try {
+      await guestApi.cancelRequest(activeRequestId);
+      setActiveRequestId(null);
+      queryClient.invalidateQueries({ queryKey: guestKeys.me });
+    } catch {
+      // Leave the stepper visible; the guest can retry.
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  // A terminal request (declined/expired) — clear the pointer after showing it briefly, then land on the form.
+  useEffect(() => {
+    if (pendingQuery.data && (pendingQuery.data.status === 'declined' || pendingQuery.data.status === 'expired')) {
+      const t = setTimeout(() => setActiveRequestId(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [pendingQuery.data, setActiveRequestId]);
+
+  if (activeRequestId && pendingQuery.isLoading) {
+    return (
+      <div className="p-4">
+        <ListSkeleton rows={1} />
+      </div>
+    );
+  }
+
+  if (activeRequestId && pendingQuery.data) {
+    return (
+      <div className="p-4">
+        <RequestStepper request={pendingQuery.data} trip={tripResp?.trip} onCancel={handleCancel} cancelling={cancelling} />
+      </div>
+    );
+  }
+
+  if (activeRequestId && pendingQuery.error) {
+    return (
+      <div className="p-4">
+        <ErrorState error={pendingQuery.error} onRetry={() => pendingQuery.refetch()} />
+      </div>
+    );
+  }
+
+  return <RequestForm guestGroupSize={guest?.groupSize ?? 1} guestLuggage={guest?.luggageCount ?? 1} accommodationId={guest?.accommodationId?.id} />;
+}
+
+function RequestForm({
+  guestGroupSize,
+  guestLuggage,
+  accommodationId
+}: {
+  guestGroupSize: number;
+  guestLuggage: number;
+  accommodationId?: string;
+}): JSX.Element {
+  const { data: locations, isLoading, error, refetch } = useGuestLocations();
+  const setActiveRequestId = useActiveRequestStore((s) => s.setRequestId);
+  const queryClient = useQueryClient();
+
+  const [fromId, setFromId] = useState<string>('');
+  const [toId, setToId] = useState<string>('');
+  const [passengers, setPassengers] = useState(Math.max(1, guestGroupSize));
+  const [luggage, setLuggage] = useState(Math.max(0, guestLuggage));
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!locations || fromId) return;
+    const mine = accommodationId && locations.find((l) => l.id === accommodationId);
+    setFromId(mine ? mine.id : locations[0]?.id ?? '');
+  }, [locations, accommodationId, fromId]);
+
+  const grouped = useMemo(() => (locations ? groupByType(locations) : []), [locations]);
+  const fromLoc = locations?.find((l) => l.id === fromId);
+  const toLoc = locations?.find((l) => l.id === toId);
+
+  const canSubmit = !!fromLoc && !!toLoc && fromLoc.id !== toLoc.id && !submitting;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fromLoc || !toLoc) return;
+    setFormError(null);
+    setSubmitting(true);
+    try {
+      const created = await guestApi.createRequest({
+        pickupLocationId: fromLoc.id,
+        pickupLabel: fromLoc.name,
+        dropoffLocationId: toLoc.id,
+        dropoffLabel: toLoc.name,
+        passengerCount: passengers,
+        luggageCount: luggage,
+        reason: reason.trim()
+      });
+      setActiveRequestId(created.id);
+      queryClient.invalidateQueries({ queryKey: guestKeys.me });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setFormError('You already have a ride request pending approval.');
+      } else {
+        setFormError(err instanceof ApiError ? err.message : 'Could not send your request. Please try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="p-4">
+        <ListSkeleton rows={2} />
+      </div>
+    );
+  }
+
+  if (error || !locations || locations.length === 0) {
+    return (
+      <div className="p-4">
+        <ErrorState error={error ?? new Error('No locations available yet.')} onRetry={() => refetch()} />
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 p-4 pb-6">
+      <div>
+        <h1 className="text-xl font-bold text-gray-900">Request a ride</h1>
+        <p className="mt-1 text-sm text-gray-500">Your driver is assigned automatically for the fastest pickup.</p>
+      </div>
+
+      <Card className="space-y-3">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">From</label>
+          <select
+            value={fromId}
+            onChange={(e) => setFromId(e.target.value)}
+            className="min-h-[48px] w-full rounded-xl border border-gray-300 bg-white px-3 text-base text-gray-900"
+          >
+            {grouped.map(([type, locs]) => (
+              <optgroup key={type} label={LOCATION_TYPE_LABEL[type] ?? type}>
+                {locs.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">To</label>
+          <select
+            value={toId}
+            onChange={(e) => setToId(e.target.value)}
+            className="min-h-[48px] w-full rounded-xl border border-gray-300 bg-white px-3 text-base text-gray-900"
+          >
+            <option value="" disabled>
+              Select a destination
+            </option>
+            {grouped.map(([type, locs]) => (
+              <optgroup key={type} label={LOCATION_TYPE_LABEL[type] ?? type}>
+                {locs.map((l) => (
+                  <option key={l.id} value={l.id} disabled={l.id === fromId}>
+                    {l.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+      </Card>
+
+      <Card className="space-y-3">
+        <Stepper label="Passengers" value={passengers} onChange={setPassengers} min={1} max={8} />
+        <Stepper label="Luggage" value={luggage} onChange={setLuggage} min={0} max={12} />
+      </Card>
+
+      <Card>
+        <label className="mb-1 block text-sm font-medium text-gray-700">Reason (optional)</label>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Heading to the keynote session"
+          className="min-h-[48px] w-full rounded-xl border border-gray-300 bg-white px-3 text-base text-gray-900"
+          maxLength={140}
+        />
+      </Card>
+
+      {formError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{formError}</p>}
+
+      <Button type="submit" fullWidth loading={submitting} disabled={!canSubmit}>
+        <Send className="mr-1.5 inline h-4 w-4" />
+        Request ride
+      </Button>
+    </form>
+  );
+}
