@@ -1,0 +1,32 @@
+stateDiagram-v2
+    [*] --> pending_driver: engine assigns / admin manual create
+
+    pending_driver --> accepted: driver accepts
+    pending_driver --> rejected: driver rejects
+    pending_driver --> cancelled: admin cancels / offer expires
+
+    accepted --> en_route_pickup: (same call as accept)
+    accepted --> cancelled
+
+    en_route_pickup --> at_pickup: driver marks arrived
+    en_route_pickup --> cancelled
+
+    at_pickup --> boarded: driver boards guest(s)
+    at_pickup --> cancelled
+
+    boarded --> completed: driver drops last stop
+    boarded --> cancelled
+
+    completed --> [*]
+    cancelled --> [*]
+    rejected --> [*]: guests re-queued, driver blacklisted for this entry
+
+    unassignable --> pending_driver: re-matched by engine
+    unassignable --> cancelled
+
+    note right of rejected
+        TripService.transition() is the ONLY
+        place trip.status is mutated. Any
+        transition not in the allowed map
+        throws a 409 ConflictError.
+    end note

@@ -1,0 +1,48 @@
+flowchart TD
+    Start(["DispatchEngine.tick() — every 30s"]) --> Lock{"Acquire tick lock?"}
+    Lock -- no --> Skip(["skip: locked"])
+    Lock -- yes --> Refresh["DriverStateService.refreshPredictedFreeState()"]
+    Refresh --> Expire["Expire stale pending_driver offers"]
+    Expire --> Fetch["Fetch waiting QueueEntry (<= batchHorizonMin), sorted by priorityScore"]
+    Fetch --> Empty{"Any waiting?"}
+    Empty -- no --> Done(["done: matched 0"])
+    Empty -- yes --> Detour
+
+    subgraph Detour["1. Detour insertion (cheapest)"]
+        D1["For each entry: DetourInserter.findBest()"]
+        D2{"Feasible insertion under maxDetourMin,\ncapacity holds throughout,\nno existing deadline broken?"}
+        D1 --> D2
+        D2 -- yes --> D3["Insert stops into live trip, mark entry assigned"]
+        D2 -- no --> D4["Leave entry in 'still waiting' set"]
+    end
+
+    Detour --> Supply{"Any eligible driver?"}
+    Supply -- no --> Alert1["Raise NO_SUPPLY alert"] --> Done2(["done"])
+    Supply -- yes --> Cluster
+
+    subgraph Batch["2. Batch Hungarian (globally optimal)"]
+        C1["Clusterer.build(): group into shared-ride ClusterDemands"]
+        C2["GroupSplitter: split any cluster > biggest vehicle"]
+        C3["ONE RoutingService.matrix() call: drivers x demands"]
+        C4["Feasibility.check() per pair -> BIG_M mask"]
+        C5["CostFunction.score() per feasible pair"]
+        C6["BatchAssigner.solve() (Hungarian, greedy above 150x150)"]
+        C1 --> C2 --> C3 --> C4 --> C5 --> C6
+    end
+
+    Cluster --> Batch
+    Batch --> Commit["Commit feasible pairs: TripService.createFromAssignment()"]
+
+    Commit --> Greedy
+
+    subgraph Greedy["3. Greedy sweep (stragglers)"]
+        G1["For each still-unmatched demand: GreedyMatcher.findBest()"]
+        G2{"Feasible driver within 12/25/unlimited km?"}
+        G1 --> G2
+        G2 -- yes --> G3["Commit trip"]
+        G2 -- no --> G4["attempts++; if > maxReassignAttempts,\nraise UNASSIGNABLE alert"]
+    end
+
+    Greedy --> Emit["Emit dispatch:tick + queue:update over Socket.IO"]
+    Emit --> Release["Release tick lock"]
+    Release --> End(["TickReport { matched, unassignable, durationMs }"])

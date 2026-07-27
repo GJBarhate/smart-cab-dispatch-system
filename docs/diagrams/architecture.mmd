@@ -1,0 +1,48 @@
+flowchart TB
+    subgraph Clients
+        Guest["Guest PWA<br/>(React, apps/guest)"]
+        Admin["Admin Portal<br/>(React, apps/admin)"]
+        DriverApp["Driver screen<br/>(same app, /driver)"]
+    end
+
+    subgraph Server["apps/server (Express + Socket.IO)"]
+        API["REST API<br/>/api/auth /guest /driver /admin /dispatch /ai"]
+        Socket["Socket.IO server<br/>rooms: admin, driver:id, guest:id, trip:id"]
+        Engine["DispatchEngine.tick()<br/>Feasibility -> Cost -> Cluster -> Hungarian -> Greedy"]
+        Reopt["Reoptimizer<br/>(2 min cron)"]
+        Sweep["Starvation sweep<br/>(1 min cron)"]
+        Routing["RoutingService<br/>OSRM -> ORS -> haversine"]
+        Cache["DistanceCache<br/>L1 LRU + L2 Mongo (geohash)"]
+    end
+
+    subgraph Data
+        Mongo[("MongoDB Atlas<br/>Driver/Guest/Trip/QueueEntry/...")]
+    end
+
+    subgraph External
+        OSRM["OSRM public demo"]
+        ORS["OpenRouteService"]
+        Gemini["Gemini (optional)"]
+    end
+
+    Guest -- REST + JWT --> API
+    Admin -- REST + JWT --> API
+    DriverApp -- REST + JWT --> API
+    Guest <-- "socket events" --> Socket
+    Admin <-- "socket events" --> Socket
+    DriverApp <-- "driver:location" --> Socket
+
+    API --> Engine
+    API --> Mongo
+    Engine --> Mongo
+    Engine --> Routing
+    Reopt --> Mongo
+    Reopt --> Routing
+    Sweep --> Engine
+    Routing --> Cache
+    Cache --> Mongo
+    Routing -.fallback chain.-> OSRM
+    Routing -.fallback chain.-> ORS
+    API -.optional.-> Gemini
+
+    Socket --> Mongo
