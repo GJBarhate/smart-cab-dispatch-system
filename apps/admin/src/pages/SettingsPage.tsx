@@ -6,6 +6,8 @@ import { Card, CardBody, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Toggle } from '../components/ui/Toggle';
 import { Skeleton } from '../components/ui/Skeleton';
+import { EmptyState } from '../components/ui/EmptyState';
+import { ErrorState } from '../components/ui/ErrorState';
 import { useToast } from '../components/ui/Toast';
 import type { EventConfig } from '../types/models';
 
@@ -85,15 +87,20 @@ export default function SettingsPage() {
     <div className="p-4 md:p-6">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Settings</h1>
-          <p className="text-sm text-gray-500">Event config: feature flags and dispatch thresholds. Cost weights live on the Dispatch Console.</p>
+          <h1 className="text-lg font-semibold text-ink">Settings</h1>
+          <p className="text-sm text-muted">Event config: feature flags and dispatch thresholds. Cost weights live on the Dispatch Console.</p>
         </div>
         <Button onClick={() => saveMutation.mutate()} disabled={!dirty} loading={saveMutation.isPending}>
           <Save size={14} /> Save changes
         </Button>
       </div>
 
-      {!flags || !thresholds ? (
+      {configQ.isError ? (
+        <ErrorState message={(configQ.error as any)?.message} onRetry={() => configQ.refetch()} />
+      ) : !configQ.data || !flags || !thresholds ? (
+        // `flags`/`thresholds` are copied out of configQ.data by an effect, so
+        // they only imply data *was* present. Checking the query directly is
+        // what actually makes the `configQ.data` reads below safe.
         <Skeleton className="h-96 w-full" />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -111,7 +118,7 @@ export default function SettingsPage() {
             <CardHeader title="Dispatch thresholds" />
             <CardBody className="grid grid-cols-2 gap-3">
               {THRESHOLD_FIELDS.map((f) => (
-                <label key={f.key} className="block text-xs font-medium text-gray-600">
+                <label key={f.key} className="block text-xs font-medium text-muted">
                   {f.label}
                   <div className="mt-1 flex items-center gap-1">
                     <input
@@ -120,7 +127,7 @@ export default function SettingsPage() {
                       onChange={(e) => updateThreshold(f.key, Number(e.target.value))}
                       className="input"
                     />
-                    {f.suffix && <span className="shrink-0 text-[11px] text-gray-400">{f.suffix}</span>}
+                    {f.suffix && <span className="shrink-0 text-[11px] text-faint">{f.suffix}</span>}
                   </div>
                 </label>
               ))}
@@ -130,12 +137,12 @@ export default function SettingsPage() {
           <Card className="lg:col-span-2">
             <CardHeader title="Traffic peak windows" subtitle="Read-only — configured at seed time; use the traffic slider on the Ops Dashboard for live simulation" />
             <CardBody>
-              {configQ.data!.traffic.peakWindows.length === 0 ? (
-                <p className="text-sm text-gray-400">No peak windows configured.</p>
+              {configQ.data.traffic.peakWindows.length === 0 ? (
+                <EmptyState title="No peak windows configured" />
               ) : (
                 <ul className="flex flex-wrap gap-2">
-                  {configQ.data!.traffic.peakWindows.map((w, i) => (
-                    <li key={i} className="rounded-md bg-gray-100 px-3 py-1.5 text-xs text-gray-700">
+                  {configQ.data.traffic.peakWindows.map((w, i) => (
+                    <li key={i} className="rounded-md bg-elevated px-3 py-1.5 text-xs text-muted">
                       {w.from}–{w.to} · {w.multiplier}x
                     </li>
                   ))}

@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+// Leaflet's stylesheet and default-icon fix travel with the map instead of
+// loading on every route — 15 kB of CSS and 45 kB gzipped of JS a guest only
+// needs on /track.
+import 'leaflet/dist/leaflet.css';
+import './leafletSetup';
 import L from 'leaflet';
 import { Locate } from 'lucide-react';
 import type { LatLng } from '../utils/geo';
@@ -116,7 +121,7 @@ function RecenterFab({
     <button
       onClick={onClick}
       aria-label="Recenter map"
-      className="absolute bottom-4 right-4 z-[1000] flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-lg ring-1 ring-black/10 active:scale-95"
+      className="absolute bottom-4 right-4 z-[1000] flex h-12 w-12 items-center justify-center rounded-full bg-surface shadow-lg ring-1 ring-line active:scale-95"
     >
       <Locate className="h-6 w-6 text-brand-600" />
     </button>

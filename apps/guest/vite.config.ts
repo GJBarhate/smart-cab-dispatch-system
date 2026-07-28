@@ -41,6 +41,22 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Same split as the admin app. It matters more here: this is the PWA a
+        // guest opens on event wifi, and leaflet is dead weight on every route
+        // except /track. Splitting also lets the service worker re-precache
+        // only the app chunk when app code changes, leaving the vendor chunks
+        // in the cache instead of re-downloading them on every deploy.
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-map': ['leaflet', 'react-leaflet'],
+          'vendor-query': ['@tanstack/react-query', 'socket.io-client']
+        }
+      }
+    }
+  },
   server: { port: 5173, strictPort: true },
   preview: { port: 5173 }
 });

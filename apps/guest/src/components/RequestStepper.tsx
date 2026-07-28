@@ -39,8 +39,8 @@ export function RequestStepper({
         <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
           <XCircle className="h-7 w-7 text-red-500" />
         </div>
-        <p className="font-semibold text-gray-800">Request declined</p>
-        {request.declineReason && <p className="mt-1 text-sm text-gray-500">{request.declineReason}</p>}
+        <p className="font-semibold text-ink">Request declined</p>
+        {request.declineReason && <p className="mt-1 text-sm text-muted">{request.declineReason}</p>}
       </Card>
     );
   }
@@ -48,8 +48,8 @@ export function RequestStepper({
   if (request.status === 'expired') {
     return (
       <Card className="text-center">
-        <p className="font-semibold text-gray-800">This request is no longer active</p>
-        <p className="mt-1 text-sm text-gray-500">It was cancelled or expired.</p>
+        <p className="font-semibold text-ink">This request is no longer active</p>
+        <p className="mt-1 text-sm text-muted">It was cancelled or expired.</p>
       </Card>
     );
   }
@@ -63,10 +63,10 @@ export function RequestStepper({
         <div className="mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-brand-50">
           <Hourglass className="h-8 w-8 animate-pulse text-brand-500" />
         </div>
-        <p className="text-lg font-bold text-gray-800">
+        <p className="text-lg font-bold text-ink">
           {onTheWay ? 'Your driver is on the way' : activeStep === 3 ? 'Driver assigned!' : activeStep === 2 ? 'Finding your driver…' : 'Request sent'}
         </p>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-muted">
           {activeStep === 1 && 'Waiting for the operations team to approve'}
           {activeStep === 2 && 'Your driver is assigned automatically for the fastest pickup.'}
           {activeStep === 3 && (onTheWay ? 'Track live progress on the Track tab.' : 'Your driver will start heading to you shortly.')}
@@ -81,17 +81,17 @@ export function RequestStepper({
             <li key={label} className="flex items-center gap-3">
               <span
                 className={`flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full ${
-                  done ? 'bg-brand-600' : active ? 'bg-brand-400 ring-4 ring-brand-100' : 'bg-gray-200'
+                  done ? 'bg-brand-600' : active ? 'bg-brand-400 ring-4 ring-brand-100' : 'bg-line'
                 }`}
               />
-              <span className={`text-sm ${done || active ? 'font-medium text-gray-800' : 'text-gray-400'}`}>{label}</span>
-              {i === 0 && <span className="ml-auto text-xs text-gray-400">{format(new Date(request.requestedAt), 'HH:mm')}</span>}
+              <span className={`text-sm ${done || active ? 'font-medium text-ink' : 'text-faint'}`}>{label}</span>
+              {i === 0 && <span className="ml-auto text-xs text-faint">{format(new Date(request.requestedAt), 'HH:mm')}</span>}
             </li>
           );
         })}
       </ol>
 
-      <p className="mt-4 text-center text-xs text-gray-400">Your driver is assigned automatically for the fastest pickup.</p>
+      <p className="mt-4 text-center text-xs text-faint">Your driver is assigned automatically for the fastest pickup.</p>
 
       {request.status === 'pending_approval' && (
         <Button variant="danger" fullWidth className="mt-4" onClick={onCancel} loading={cancelling}>

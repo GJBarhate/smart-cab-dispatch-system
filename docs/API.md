@@ -85,8 +85,25 @@ Any request for another driver's trip returns **404, not 403** (no existence lea
 | GET / PATCH | `/config` | Live-tune dispatch weights, traffic multiplier, feature flags. |
 | GET | `/alerts` | `?acknowledged=true\|false`. |
 | POST | `/alerts/:id/ack` | Acknowledge. |
-| GET | `/analytics` | Avg/p95 wait, shared-ride %, driver utilisation, assignments by strategy. |
+| GET | `/analytics` | Fleet analytics — see the response shape below. |
 | GET | `/audit` | `?page=&pageSize=` — paginated audit log. |
+
+### `GET /admin/analytics` response
+
+| Field | Type | Meaning |
+|---|---|---|
+| `avgWaitMin`, `p95WaitMin` | number | Mean and 95th-percentile guest wait over completed trips. |
+| `sharedRidePct` | number | Share of completed trips carrying more than one guest. |
+| `driverUtilisationPct` | number | Active drivers currently on a trip, as a percentage of the active fleet. |
+| `assignmentsByStrategy` | `Record<string, number>` | Completed trips by the strategy that matched them (detour / batch / greedy). |
+| `tripsCompleted` | number | Completed trip count. |
+| `waitDistribution` | `{ bucket, count }[]` | Wait times bucketed 0-5 / 5-10 / 10-15 / 15-20 / 20-30 / 30+ min. The shape matters more than the mean when arrivals are bursty — a good average still hides a long tail. |
+| `etaAccuracyDistribution` | `{ bucket, count }[]` | Signed ETA error (predicted − actual) in minutes, bucketed `< -5` … `> 5`. Negative means the guest was quoted a shorter wait than they got. |
+| `etaWithin2MinPct` | number | Share of completed trips whose ETA landed within ±2 minutes. |
+| `tripsByHour` | `{ hour, trips, guests }[]` | Throughput over the last 12 hours. Keyed by *absolute* hour, not hour-of-day, so a window straddling midnight stays in chronological order; quiet hours are emitted as zeroes rather than skipped. |
+| `tripsPerDriver` | `{ name, trips }[]` | Completed trips per active driver, descending — utilisation as a distribution rather than one fleet-wide number. |
+| `detourSavedMin` | number | Minutes saved by sharing: for each shared trip, the `(guests − 1)` journeys not driven (valued at the **median** single-guest trip, so one airport outlier can't inflate it) less the detour actually incurred. Floored at 0. |
+| `sharedTripCount` | number | Number of shared trips `detourSavedMin` was derived from. |
 
 ## Dispatch control — `/api/dispatch` (role: admin)
 

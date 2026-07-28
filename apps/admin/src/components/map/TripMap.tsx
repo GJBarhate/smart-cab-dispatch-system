@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
 import { useEffect } from 'react';
+// See LiveOpsMap: leaflet's CSS and icon fix ship with the map chunk.
+import 'leaflet/dist/leaflet.css';
+import './leafletSetup';
 import { toLeafletTuple, decodePolyline, isZeroPoint, type LatLngTuple } from '../../lib/geo';
 import { carDivIcon, pinDivIcon } from './driverIcons';
 import type { TripStop } from '../../types/models';

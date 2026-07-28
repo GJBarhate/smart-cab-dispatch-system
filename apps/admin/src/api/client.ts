@@ -29,6 +29,32 @@ export function registerUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
+// A 401 with a token attached means the session died mid-use (expired or
+// revoked) rather than a bad password. Recording it lets /login say so instead
+// of silently presenting an empty form, which reads as "the app logged me out
+// for no reason". sessionStorage, not a module variable, so it survives the
+// hard redirect fallback and dies with the tab.
+const SESSION_EXPIRED_KEY = 'eventride-admin-session-expired';
+
+function markSessionExpired(): void {
+  try {
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, '1');
+  } catch {
+    // Blocked storage — the user just gets the plain sign-in form.
+  }
+}
+
+/** Reads and clears the flag, so the notice shows exactly once. */
+export function consumeSessionExpired(): boolean {
+  try {
+    const expired = sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1';
+    if (expired) sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+    return expired;
+  } catch {
+    return false;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<{ data: T; meta?: Record<string, unknown> }> {
   const token = useAuthStore.getState().token;
   const headers = new Headers(options.headers);
@@ -51,6 +77,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<{ da
   }
 
   if (res.status === 401) {
+    // `token` present ⇒ we had a session and it stopped being accepted. A 401
+    // on the login call itself has no token and is just a wrong password.
+    if (token) markSessionExpired();
     useAuthStore.getState().clear();
     onUnauthorized?.();
   }

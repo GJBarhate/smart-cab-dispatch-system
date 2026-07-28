@@ -459,7 +459,15 @@ adminRouter.post(
 
     trip.driverId = newDriver._id;
     trip.vehicleSnapshot = { number: newDriver.vehicle!.number, model: newDriver.vehicle!.model, seats: newDriver.capacity!.seats, luggage: newDriver.capacity!.luggage };
-    trip.assignmentMeta = { ...trip.assignmentMeta, strategy: 'manual_override', decidedBy: req.user!.sub, decidedAt: new Date() } as any;
+    // Set the three fields by path rather than rebuilding the object with a
+    // spread. `assignmentMeta` is a Mongoose nested path, not a plain object:
+    // spreading it drops the nested `costBreakdown`, which then casts as
+    // undefined and fails the whole save with a 500. Setting by path touches
+    // only these keys, so the engine's original cost figures survive — they are
+    // exactly what the "Why this driver?" explanation reads back.
+    trip.set('assignmentMeta.strategy', 'manual_override');
+    trip.set('assignmentMeta.decidedBy', req.user!.sub);
+    trip.set('assignmentMeta.decidedAt', new Date());
     trip.timeline.push({ at: new Date(), type: 'reassigned', actor: req.user!.sub, payload: { from: oldDriverId, to: req.body.driverId } });
     await trip.save();
 
@@ -650,18 +658,47 @@ adminRouter.post(
 
 // ---------- Analytics ----------
 
+const WAIT_BUCKETS = [
+  { label: '0-5', min: 0, max: 5 },
+  { label: '5-10', min: 5, max: 10 },
+  { label: '10-15', min: 10, max: 15 },
+  { label: '15-20', min: 15, max: 20 },
+  { label: '20-30', min: 20, max: 30 },
+  { label: '30+', min: 30, max: Infinity }
+];
+
+// Signed ETA error in minutes (predicted - actual): negative means the guest
+// was told a shorter wait than they got.
+const ETA_BUCKETS = [
+  { label: '< -5', min: -Infinity, max: -5 },
+  { label: '-5..-2', min: -5, max: -2 },
+  { label: '-2..0', min: -2, max: 0 },
+  { label: '0..2', min: 0, max: 2 },
+  { label: '2..5', min: 2, max: 5 },
+  { label: '> 5', min: 5, max: Infinity }
+];
+
+function bucketise<T extends { label: string; min: number; max: number }>(buckets: T[], values: number[]) {
+  return buckets.map((b) => ({
+    bucket: b.label,
+    count: values.filter((v) => v >= b.min && v < b.max).length
+  }));
+}
+
 adminRouter.get(
   '/analytics',
   asyncHandler(async (_req, res) => {
-    const completedTrips = await Trip.find({ status: 'completed' }).select('metrics assignmentMeta guests createdAt').lean();
+    const completedTrips = await Trip.find({ status: 'completed' })
+      .select('metrics assignmentMeta guests createdAt completedAt route driverId')
+      .lean();
 
     const waits = completedTrips.map((t: any) => t.metrics?.guestWaitMinutes ?? 0).filter((n: number) => n > 0);
     const sorted = [...waits].sort((a, b) => a - b);
     const p95 = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0;
     const avgWait = waits.length ? waits.reduce((a: number, b: number) => a + b, 0) / waits.length : 0;
 
-    const sharedRides = completedTrips.filter((t: any) => t.guests.length > 1).length;
-    const sharedRidePct = completedTrips.length ? (sharedRides / completedTrips.length) * 100 : 0;
+    const sharedTrips = completedTrips.filter((t: any) => t.guests.length > 1);
+    const sharedRidePct = completedTrips.length ? (sharedTrips.length / completedTrips.length) * 100 : 0;
 
     const byStrategy: Record<string, number> = {};
     for (const t of completedTrips as any[]) {
@@ -669,8 +706,76 @@ adminRouter.get(
       byStrategy[s] = (byStrategy[s] ?? 0) + 1;
     }
 
+    // Wait-time distribution — the shape matters more than the mean when
+    // arrivals are bursty, because a good average can still hide a long tail.
+    const waitDistribution = bucketise(WAIT_BUCKETS, waits);
+
+    // ETA accuracy: metrics.etaAccuracySec is the signed predicted-minus-actual
+    // error recorded at completion.
+    const etaErrorsMin = completedTrips
+      .map((t: any) => (t.metrics?.etaAccuracySec ?? 0) / 60)
+      .filter((n: number) => Number.isFinite(n));
+    const etaAccuracyDistribution = bucketise(ETA_BUCKETS, etaErrorsMin);
+    const withinTwoMin = etaErrorsMin.filter((e) => Math.abs(e) <= 2).length;
+    const etaWithin2MinPct = etaErrorsMin.length ? (withinTwoMin / etaErrorsMin.length) * 100 : 0;
+
+    // Throughput over the last 12 hours — the utilisation curve.
+    //
+    // Buckets are keyed by absolute hour, not hour-of-day: grouping by
+    // getHours() and sorting 0..23 puts last night's 22:00 bar to the right of
+    // this morning's 01:00 one whenever the window straddles midnight. Empty
+    // hours are emitted as zeroes so the line stays continuous instead of
+    // interpolating across a quiet stretch.
+    const HOURS_BACK = 12;
+    const hourStart = new Date();
+    hourStart.setMinutes(0, 0, 0);
+
+    const buckets: Array<{ at: Date; hour: string; trips: number; guests: number }> = [];
+    const indexByKey = new Map<number, number>();
+    for (let i = HOURS_BACK - 1; i >= 0; i--) {
+      const at = new Date(hourStart.getTime() - i * 60 * 60_000);
+      indexByKey.set(at.getTime(), buckets.length);
+      buckets.push({ at, hour: `${String(at.getHours()).padStart(2, '0')}:00`, trips: 0, guests: 0 });
+    }
+
+    for (const t of completedTrips as any[]) {
+      const at = t.completedAt ?? t.createdAt;
+      if (!at) continue;
+      const slot = new Date(at);
+      slot.setMinutes(0, 0, 0);
+      const idx = indexByKey.get(slot.getTime());
+      if (idx === undefined) continue; // older than the window
+      buckets[idx].trips += 1;
+      buckets[idx].guests += t.guests.length;
+    }
+
+    const tripsByHour = buckets.map(({ hour, trips, guests }) => ({ hour, trips, guests }));
+
+    // Minutes saved by sharing. A shared trip carrying N guests replaces N
+    // separate trips, so the saving is the (N-1) journeys not driven, less the
+    // detour actually incurred to combine them. The baseline is the median
+    // single-guest trip so one outlier airport run can't inflate it.
+    const soloDurations = completedTrips
+      .filter((t: any) => t.guests.length === 1 && (t.route?.durationSeconds ?? 0) > 0)
+      .map((t: any) => t.route.durationSeconds / 60)
+      .sort((a: number, b: number) => a - b);
+    const medianSoloMin = soloDurations.length ? soloDurations[Math.floor(soloDurations.length / 2)] : 0;
+
+    let detourSavedMin = 0;
+    for (const t of sharedTrips as any[]) {
+      detourSavedMin += (t.guests.length - 1) * medianSoloMin - (t.metrics?.detourAddedMin ?? 0);
+    }
+    detourSavedMin = Math.max(0, detourSavedMin);
+
     const driverCount = await Driver.countDocuments({ isActive: true });
     const busyDrivers = await Driver.countDocuments({ status: { $in: ['assigned', 'en_route_pickup', 'at_pickup', 'on_trip'] } });
+
+    // Per-driver completed-trip counts, so utilisation can be read as a
+    // distribution rather than a single fleet-wide percentage.
+    const driverDocs = await Driver.find({ isActive: true }).select('name stats').lean();
+    const tripsPerDriver = driverDocs
+      .map((d: any) => ({ name: d.name.split(' ')[0], trips: d.stats?.tripsCompleted ?? 0 }))
+      .sort((a, b) => b.trips - a.trips);
 
     res.json({
       ok: true,
@@ -680,7 +785,14 @@ adminRouter.get(
         sharedRidePct: Number(sharedRidePct.toFixed(1)),
         driverUtilisationPct: driverCount ? Number(((busyDrivers / driverCount) * 100).toFixed(1)) : 0,
         assignmentsByStrategy: byStrategy,
-        tripsCompleted: completedTrips.length
+        tripsCompleted: completedTrips.length,
+        waitDistribution,
+        etaAccuracyDistribution,
+        etaWithin2MinPct: Number(etaWithin2MinPct.toFixed(1)),
+        tripsByHour,
+        tripsPerDriver,
+        detourSavedMin: Math.round(detourSavedMin),
+        sharedTripCount: sharedTrips.length
       }
     });
   })

@@ -8,7 +8,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
 import { signToken } from '../middleware/auth';
-import { UnauthorizedError, NotFoundError } from '../utils/errors';
+import { UnauthorizedError, StaleSessionError } from '../utils/errors';
 import { AuditLog } from '../models/AuditLog';
 
 export const authRouter = Router();
@@ -81,20 +81,20 @@ authRouter.get(
 
     if (role === 'admin') {
       const user = await User.findById(sub).select('-passwordHash');
-      if (!user) throw new NotFoundError('User');
+      if (!user) throw new StaleSessionError('User');
       res.json({ ok: true, data: { role, user } });
       return;
     }
 
     if (role === 'driver') {
       const driver = await Driver.findById(driverId);
-      if (!driver) throw new NotFoundError('Driver');
+      if (!driver) throw new StaleSessionError('Driver');
       res.json({ ok: true, data: { role, driver } });
       return;
     }
 
     const guest = await Guest.findById(guestId);
-    if (!guest) throw new NotFoundError('Guest');
+    if (!guest) throw new StaleSessionError('Guest');
     res.json({ ok: true, data: { role, guest } });
   })
 );

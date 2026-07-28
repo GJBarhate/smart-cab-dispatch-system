@@ -9,7 +9,8 @@
   },
   "scripts": {
     "sync": "node scripts/sync-shared.mjs",
-    "dev": "npm run sync && concurrently -n server,guest,admin -c blue,green,magenta \"npm:dev:server\" \"npm:dev:guest\" \"npm:dev:admin\"",
+    "predev": "node scripts/check-ports.mjs",
+    "dev": "npm run sync && concurrently -n server,guest,admin -c blue,green,magenta --kill-others --success first \"npm:dev:server\" \"npm:dev:guest\" \"npm:dev:admin\"",
     "dev:server": "npm run dev -w server",
     "dev:guest": "npm run dev -w guest",
     "dev:admin": "npm run dev -w admin",
@@ -17,7 +18,7 @@
     "seed": "npm run seed -w server",
     "seed:fresh": "npm run seed:fresh -w server",
     "simulate": "npm run simulate -w server",
-    "test": "npm run sync && npm run test -w server",
+    "test": "npm run sync && npm run test -w server && npm run test -w guest && npm run test -w admin",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "npm run sync && npm run typecheck -w server && npm run typecheck -w guest && npm run typecheck -w admin"
   },

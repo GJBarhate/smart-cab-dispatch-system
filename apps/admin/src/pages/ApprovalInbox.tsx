@@ -83,8 +83,8 @@ export default function ApprovalInbox() {
     <div className="p-4 md:p-6">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Approval Inbox</h1>
-          <p className="text-sm text-gray-500">On-demand ride requests awaiting a human decision — the engine takes over the moment you approve.</p>
+          <h1 className="text-lg font-semibold text-ink">Approval Inbox</h1>
+          <p className="text-sm text-muted">On-demand ride requests awaiting a human decision — the engine takes over the moment you approve.</p>
         </div>
         <Badge tone="amber">{requestsQ.data?.length ?? 0} pending</Badge>
       </div>
@@ -96,23 +96,23 @@ export default function ApprovalInbox() {
       ) : !requestsQ.data?.length ? (
         <EmptyState icon={InboxIcon} title="Inbox zero" description="No on-demand requests are waiting for approval right now." />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="er-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {requestsQ.data.map((r) => (
             <Card key={r.id}>
               <CardBody className="space-y-3">
-                <div className="flex items-center justify-between text-xs text-gray-500">
+                <div className="flex items-center justify-between text-xs text-muted">
                   <span>Requested {fmtTime(r.requestedAt)} · {fmtRelative(r.requestedAt)}</span>
                   <Badge>{r.passengerCount} pax · {r.luggageCount} bags</Badge>
                 </div>
-                <p className="text-sm font-semibold text-gray-900">{r.pickup.label} → {r.dropoff.label}</p>
-                {r.reason && <p className="text-xs text-gray-500">Reason: {r.reason}</p>}
+                <p className="text-sm font-semibold text-ink">{r.pickup.label} → {r.dropoff.label}</p>
+                {r.reason && <p className="text-xs text-muted">Reason: {r.reason}</p>}
                 <FeasibilityChip request={r} />
                 <div className="flex gap-2 pt-1">
                   <Button size="sm" variant="success" className="flex-1" onClick={() => approveMutation.mutate(r.id)} loading={approveMutation.isPending}>
-                    <ThumbsUp size={13} /> Approve
+                    <ThumbsUp size={12} /> Approve
                   </Button>
                   <Button size="sm" variant="secondary" className="flex-1" onClick={() => setDeclineTarget(r)}>
-                    <ThumbsDown size={13} /> Decline
+                    <ThumbsDown size={12} /> Decline
                   </Button>
                 </div>
               </CardBody>
@@ -138,7 +138,7 @@ export default function ApprovalInbox() {
           </>
         }
       >
-        <p className="mb-3 text-sm text-gray-600">The guest will be notified with this reason.</p>
+        <p className="mb-3 text-sm text-muted">The guest will be notified with this reason.</p>
         <div className="space-y-2">
           {DECLINE_REASONS.map((reason) => (
             <label key={reason} className="flex items-center gap-2 text-sm">

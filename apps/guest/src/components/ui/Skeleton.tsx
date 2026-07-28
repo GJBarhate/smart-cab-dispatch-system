@@ -1,12 +1,14 @@
 import React from 'react';
 
+// A travelling sweep rather than a pulse: it reads as "on its way" instead of
+// "something is here".
 export function Skeleton({ className = '' }: { className?: string }): JSX.Element {
-  return <div className={`animate-pulse rounded-lg bg-gray-200 ${className}`} />;
+  return <div className={`er-shimmer rounded-lg bg-line-soft ${className}`} />;
 }
 
 export function CardSkeleton(): JSX.Element {
   return (
-    <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
+    <div className="er-elev-1 rounded-2xl bg-surface p-4 ring-1 ring-line/70">
       <Skeleton className="h-4 w-1/3" />
       <Skeleton className="mt-3 h-8 w-2/3" />
       <Skeleton className="mt-2 h-4 w-full" />

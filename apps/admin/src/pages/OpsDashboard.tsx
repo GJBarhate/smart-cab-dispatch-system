@@ -5,7 +5,7 @@ import {
   Play, Radio, ThumbsUp, ThumbsDown, BellRing
 } from 'lucide-react';
 import { AdminApi, DispatchApi } from '../api/endpoints';
-import { useSocketEvent } from '../hooks/useSocket';
+import { useSocket, useSocketEvent } from '../hooks/useSocket';
 import { useToast } from '../components/ui/Toast';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -13,9 +13,12 @@ import { Button } from '../components/ui/Button';
 import { Toggle } from '../components/ui/Toggle';
 import { Slider } from '../components/ui/Slider';
 import { Skeleton, SkeletonCard } from '../components/ui/Skeleton';
+import { AnimatedNumber } from '../components/ui/AnimatedNumber';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { LiveOpsMap } from '../components/map/LiveOpsMap';
+import { OpsCopilot } from '../components/ai/OpsCopilot';
 import { fmtNum, fmtRelative, fmtTime } from '../lib/format';
 import type { Alert, RideRequest } from '../types/models';
 
@@ -25,6 +28,15 @@ interface ActivityItem {
   text: string;
   tone: 'info' | 'success' | 'warning' | 'error';
 }
+
+// Colour carries the same meaning as the number, never replaces it — a tile is
+// still fully readable in greyscale or with the hue stripped.
+const TILE_TONES: Record<string, string> = {
+  calm: 'text-ink',
+  good: 'text-emerald-700',
+  warn: 'text-amber-700',
+  bad: 'text-red-700'
+};
 
 function kpiIconFor(key: string) {
   switch (key) {
@@ -40,7 +52,9 @@ function kpiIconFor(key: string) {
 export default function OpsDashboard() {
   const qc = useQueryClient();
   const { push } = useToast();
+  const { connected: socketConnected } = useSocket();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [declineTarget, setDeclineTarget] = useState<RideRequest | null>(null);
 
   const dashboardQ = useQuery({ queryKey: ['dashboard'], queryFn: AdminApi.dashboard, refetchInterval: 20_000 });
   const configQ = useQuery({ queryKey: ['config'], queryFn: AdminApi.config });
@@ -117,7 +131,9 @@ export default function OpsDashboard() {
     onSuccess: () => {
       push({ kind: 'info', title: 'Request declined' });
       qc.invalidateQueries({ queryKey: ['requests', 'pending_approval'] });
-    }
+      setDeclineTarget(null);
+    },
+    onError: (e: any) => push({ kind: 'error', title: 'Decline failed', description: e.message })
   });
 
   const ackMutation = useMutation({
@@ -143,24 +159,36 @@ export default function OpsDashboard() {
   const health = healthQ.data;
 
   const kpis = dashboardQ.data?.kpis;
+  // Values stay numeric so the tiles can tween them; the unit rides along as a
+  // suffix rather than being baked into a pre-formatted string.
   const kpiTiles = kpis
     ? [
-        { key: 'guestsWaiting', label: 'Guests waiting', value: kpis.guestsWaiting },
-        { key: 'avgWaitMin', label: 'Avg wait', value: `${fmtNum(kpis.avgWaitMin)}m` },
-        { key: 'oldestWaitMin', label: 'p95-ish / oldest wait', value: `${fmtNum(kpis.oldestWaitMin)}m` },
-        { key: 'idle', label: 'Drivers idle', value: dashboardQ.data?.driversByStatus.idle ?? 0 },
-        { key: 'busy', label: 'Drivers busy', value: Object.entries(dashboardQ.data?.driversByStatus ?? {}).filter(([k]) => !['idle', 'offline', 'on_break', 'suspended'].includes(k)).reduce((s, [, v]) => s + v, 0) },
-        { key: 'break', label: 'On break', value: dashboardQ.data?.driversByStatus.on_break ?? 0 },
-        { key: 'unassignable', label: 'Unassignable', value: kpis.unassignable },
-        { key: 'tripsCompletedToday', label: 'Trips completed today', value: kpis.tripsCompletedToday }
+        { key: 'guestsWaiting', label: 'Guests waiting', value: kpis.guestsWaiting, suffix: '', decimals: 0, tone: kpis.guestsWaiting > 0 ? 'warn' : 'calm' },
+        { key: 'avgWaitMin', label: 'Avg wait', value: Number(fmtNum(kpis.avgWaitMin)) || 0, suffix: 'm', decimals: 0, tone: 'calm' },
+        { key: 'oldestWaitMin', label: 'p95-ish / oldest wait', value: Number(fmtNum(kpis.oldestWaitMin)) || 0, suffix: 'm', decimals: 0, tone: 'calm' },
+        { key: 'idle', label: 'Drivers idle', value: dashboardQ.data?.driversByStatus.idle ?? 0, suffix: '', decimals: 0, tone: 'calm' },
+        { key: 'busy', label: 'Drivers busy', value: Object.entries(dashboardQ.data?.driversByStatus ?? {}).filter(([k]) => !['idle', 'offline', 'on_break', 'suspended'].includes(k)).reduce((s, [, v]) => s + v, 0), suffix: '', decimals: 0, tone: 'calm' },
+        { key: 'break', label: 'On break', value: dashboardQ.data?.driversByStatus.on_break ?? 0, suffix: '', decimals: 0, tone: 'calm' },
+        { key: 'unassignable', label: 'Unassignable', value: kpis.unassignable, suffix: '', decimals: 0, tone: kpis.unassignable > 0 ? 'bad' : 'calm' },
+        { key: 'tripsCompletedToday', label: 'Trips completed today', value: kpis.tripsCompletedToday, suffix: '', decimals: 0, tone: 'good' }
       ]
     : [];
 
   return (
     <div className="flex flex-col gap-4 p-4 md:p-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+      <div className="er-elev-1 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
+          {/* The ping is the signal that the feed is live — it stops the moment
+              the socket drops, so a frozen dashboard can't masquerade as a calm
+              one. `title` carries the same state for non-visual readers. */}
+          <span
+            className="flex items-center gap-2 text-xs font-medium text-muted"
+            title={socketConnected ? 'Realtime feed connected' : 'Realtime feed disconnected — figures may be stale'}
+          >
+            <span className="er-live-dot" data-stale={!socketConnected} />
+            {socketConnected ? 'Live' : 'Offline'}
+          </span>
           <Badge tone={health?.routing.breakerOpen ? 'red' : 'green'}>
             <Radio size={12} className="mr-1 inline" />
             {health ? `${health.routing.provider} · cache ${(health.routing.cacheHitRate * 100).toFixed(0)}% · breaker ${health.routing.breakerOpen ? 'open' : 'closed'}` : 'routing health…'}
@@ -193,7 +221,7 @@ export default function OpsDashboard() {
       </div>
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="er-stagger grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         {dashboardQ.isLoading
           ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
           : dashboardQ.isError
@@ -201,9 +229,14 @@ export default function OpsDashboard() {
           : kpiTiles.map((t) => {
               const Icon = kpiIconFor(t.key);
               return (
-                <div key={t.key} className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-                  <div className="mb-1 flex items-center gap-1.5 text-gray-400"><Icon size={13} /><span className="text-[11px] font-medium uppercase tracking-wide">{t.label}</span></div>
-                  <p className="text-xl font-bold text-gray-900">{t.value}</p>
+                <div key={t.key} className="er-elev-1 er-spotlight er-lift rounded-xl border border-line bg-surface p-3">
+                  <div className="mb-1 flex items-center gap-1.5 text-faint">
+                    <Icon size={13} />
+                    <span className="truncate text-[11px] font-medium uppercase tracking-wide">{t.label}</span>
+                  </div>
+                  <p className={`text-xl font-bold tracking-tight ${TILE_TONES[t.tone]}`}>
+                    <AnimatedNumber value={t.value} suffix={t.suffix} decimals={t.decimals} />
+                  </p>
                 </div>
               );
             })}
@@ -227,7 +260,7 @@ export default function OpsDashboard() {
             <CardHeader
               title="Pending approvals"
               subtitle={requestsQ.data ? `${requestsQ.data.length} waiting` : undefined}
-              action={<Car size={16} className="text-gray-300" />}
+              action={<Car size={16} className="text-faint" />}
             />
             <CardBody className="max-h-64 overflow-y-auto">
               {requestsQ.isLoading ? (
@@ -237,17 +270,17 @@ export default function OpsDashboard() {
               ) : (
                 <ul className="space-y-2">
                   {requestsQ.data.map((r: RideRequest) => (
-                    <li key={r.id} className="rounded-lg border border-gray-100 p-2.5">
-                      <div className="flex items-center justify-between text-xs text-gray-500">
+                    <li key={r.id} className="rounded-lg border border-line-soft p-2.5">
+                      <div className="flex items-center justify-between text-xs text-muted">
                         <span>{fmtTime(r.requestedAt)} · {r.passengerCount} pax</span>
                         <Badge tone="amber">pending</Badge>
                       </div>
-                      <p className="mt-1 truncate text-sm font-medium text-gray-800">{r.pickup.label} → {r.dropoff.label}</p>
+                      <p className="mt-1 truncate text-sm font-medium text-ink">{r.pickup.label} → {r.dropoff.label}</p>
                       <div className="mt-2 flex gap-2">
                         <Button size="sm" variant="success" onClick={() => approveMutation.mutate(r.id)} loading={approveMutation.isPending}>
                           <ThumbsUp size={12} /> Approve
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={() => declineMutation.mutate({ id: r.id, reason: 'Not feasible right now' })}>
+                        <Button size="sm" variant="secondary" onClick={() => setDeclineTarget(r)}>
                           <ThumbsDown size={12} /> Decline
                         </Button>
                       </div>
@@ -259,7 +292,7 @@ export default function OpsDashboard() {
           </Card>
 
           <Card>
-            <CardHeader title="Alerts" action={<BellRing size={16} className="text-gray-300" />} />
+            <CardHeader title="Alerts" action={<BellRing size={16} className="text-faint" />} />
             <CardBody className="max-h-48 overflow-y-auto">
               {dashboardQ.isLoading ? (
                 <Skeleton className="h-16 w-full" />
@@ -268,16 +301,16 @@ export default function OpsDashboard() {
               ) : (
                 <ul className="space-y-2">
                   {dashboardQ.data.alerts.map((a) => (
-                    <li key={a.id} className="flex items-start gap-2 rounded-lg border border-gray-100 p-2 text-xs">
-                      <Badge tone={a.level === 'critical' ? 'red' : a.level === 'warning' ? 'amber' : 'blue'}>{a.level}</Badge>
+                    <li key={a.id} className="flex items-start gap-2 rounded-lg border border-line-soft p-2.5 text-xs">
+                      <Badge tone={a.level === 'critical' ? 'red' : a.level === 'warning' ? 'amber' : 'purple'}>{a.level}</Badge>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-gray-800">{a.message}</p>
-                        <p className="text-gray-400">{fmtRelative(a.createdAt)}</p>
+                        <p className="truncate font-medium text-ink">{a.message}</p>
+                        <p className="text-faint">{fmtRelative(a.createdAt)}</p>
                       </div>
                       <button
                         onClick={() => ackMutation.mutate(a.id)}
                         disabled={ackMutation.isPending}
-                        className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-ops-600 hover:bg-ops-50 disabled:opacity-50"
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-ops-600 hover:bg-ops-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ops-600 disabled:opacity-50"
                       >
                         Ack
                       </button>
@@ -298,16 +331,29 @@ export default function OpsDashboard() {
                   {activity.map((a) => (
                     <li key={a.id} className="flex items-start gap-2 text-xs">
                       <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-ops-400" />
-                      <span className="text-gray-700">{a.text}</span>
-                      <span className="ml-auto shrink-0 text-gray-400">{fmtTime(a.at)}</span>
+                      <span className="text-muted">{a.text}</span>
+                      <span className="ml-auto shrink-0 text-faint">{fmtTime(a.at)}</span>
                     </li>
                   ))}
                 </ul>
               )}
             </CardBody>
           </Card>
+
+          <OpsCopilot aiEnabled={cfg?.featureFlags.aiEnabled ?? false} />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!declineTarget}
+        title="Decline this request?"
+        message={declineTarget ? `${declineTarget.pickup.label} → ${declineTarget.dropoff.label} will be declined and the guest notified.` : ''}
+        confirmLabel="Decline"
+        danger
+        loading={declineMutation.isPending}
+        onConfirm={() => declineTarget && declineMutation.mutate({ id: declineTarget.id, reason: 'Not feasible right now' })}
+        onCancel={() => setDeclineTarget(null)}
+      />
     </div>
   );
 }

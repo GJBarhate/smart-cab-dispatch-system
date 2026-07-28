@@ -9,6 +9,7 @@
     "prebuild": "node ../../scripts/sync-shared.mjs",
     "build": "tsc -b --pretty && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {

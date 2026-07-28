@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#2563eb" />
     <title>EventRide</title>
+    <script>
+      // Applies the saved theme before first paint — see the admin app for the
+      // reasoning. Key must match THEME_STORAGE_KEY in src/store/themeStore.ts.
+      (function () {
+        try {
+          var saved = localStorage.getItem('eventride-guest-theme');
+          var dark = saved === 'dark' || (saved === null && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {
+          /* storage blocked — fall back to the light default */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

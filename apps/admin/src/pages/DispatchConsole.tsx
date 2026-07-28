@@ -45,10 +45,10 @@ function lerpColor(t: number): string {
 }
 
 function BreakdownRow({ label, value }: { label: string; value: number }) {
-  const tone = value > 0 ? 'text-red-600' : value < 0 ? 'text-emerald-600' : 'text-gray-500';
+  const tone = value > 0 ? 'text-red-600' : value < 0 ? 'text-emerald-600' : 'text-muted';
   return (
     <div className="flex items-center justify-between text-xs">
-      <span className="text-gray-500">{label}</span>
+      <span className="text-muted">{label}</span>
       <span className={`tabular-nums font-medium ${tone}`}>{value >= 0 ? '+' : ''}{value.toFixed(2)}</span>
     </div>
   );
@@ -121,22 +121,24 @@ export default function DispatchConsole() {
     <div className="flex flex-col gap-4 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Dispatch Console</h1>
-          <p className="text-sm text-gray-500">
+          <h1 className="text-lg font-semibold text-ink">Dispatch Console</h1>
+          <p className="text-sm text-muted">
             A dry-run preview of the Hungarian batch assigner — nothing here commits a trip. Cost matrix: drivers × demand clusters.
           </p>
         </div>
         <Button onClick={() => previewMutation.mutate()} loading={previewMutation.isPending}>
-          <PlayCircle size={15} /> Preview batch
+          <PlayCircle size={14} /> Preview batch
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+      <div className="er-stagger grid grid-cols-1 gap-4 xl:grid-cols-4">
         {/* Weight sliders */}
         <Card className="xl:col-span-1">
           <CardHeader title="Cost weights" subtitle="Changes PATCH the live config and re-run the preview" />
           <CardBody className="space-y-4">
-            {!weights ? (
+            {configQ.isError ? (
+              <ErrorState message={(configQ.error as any)?.message} onRetry={() => configQ.refetch()} />
+            ) : !weights ? (
               <Skeleton className="h-64 w-full" />
             ) : (
               WEIGHT_META.map((m) => (
@@ -161,11 +163,11 @@ export default function DispatchConsole() {
             title="Cost matrix heatmap"
             subtitle={preview ? `${preview.drivers.length} drivers × ${preview.demands.length} demand clusters` : undefined}
             action={
-              <div className="flex items-center gap-3 text-[11px] text-gray-500">
+              <div className="flex items-center gap-3 text-[11px] text-muted">
                 <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm" style={{ background: lerpColor(0.05) }} /> cheap</span>
                 <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm" style={{ background: lerpColor(0.95) }} /> costly</span>
-                <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm border-2 border-emerald-500 bg-white" /> selected</span>
-                <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-gray-200 bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,#9ca3af_2px,#9ca3af_3px)]" /> infeasible</span>
+                <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm border-2 border-emerald-500 bg-surface" /> selected</span>
+                <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-line bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,rgb(var(--c-faint))_2px,rgb(var(--c-faint))_3px)]" /> infeasible</span>
               </div>
             }
           />
@@ -173,7 +175,7 @@ export default function DispatchConsole() {
             {previewMutation.isPending && !preview ? (
               <Skeleton className="h-72 w-full" />
             ) : previewMutation.isError ? (
-              <ErrorState message="Could not load the preview" onRetry={() => previewMutation.mutate()} />
+              <ErrorState message={(previewMutation.error as any)?.message ?? 'Could not load the preview'} onRetry={() => previewMutation.mutate()} />
             ) : !preview || preview.drivers.length === 0 || preview.demands.length === 0 ? (
               <EmptyState
                 icon={Sparkles}
@@ -182,15 +184,15 @@ export default function DispatchConsole() {
               />
             ) : (
               <div className="flex flex-col gap-4 lg:flex-row">
-                <div className="min-w-0 flex-1 overflow-auto rounded-lg border border-gray-100" style={{ maxHeight: 460 }}>
+                <div className="min-w-0 flex-1 overflow-auto rounded-lg border border-line-soft" style={{ maxHeight: 460 }}>
                   <table className="border-collapse text-[11px]">
                     <thead>
                       <tr>
-                        <th className="sticky left-0 top-0 z-20 bg-white p-1 text-left" />
+                        <th className="sticky left-0 top-0 z-20 bg-surface p-1 text-left" />
                         {preview.demands.map((d, j) => (
                           <th
                             key={d.id}
-                            className="sticky top-0 z-10 min-w-[30px] bg-white p-1 text-center font-medium text-gray-500"
+                            className="sticky top-0 z-10 min-w-[30px] bg-surface p-1 text-center font-medium text-muted"
                             title={`Demand ${j + 1} — ${d.guestIds.length} guest(s), ${d.seats} seats`}
                           >
                             R{j + 1}
@@ -201,7 +203,7 @@ export default function DispatchConsole() {
                     <tbody>
                       {preview.drivers.map((drv, i) => (
                         <tr key={drv.id}>
-                          <th className="sticky left-0 z-10 whitespace-nowrap bg-white p-1 text-right font-medium text-gray-500" title={drv.name}>
+                          <th className="sticky left-0 z-10 whitespace-nowrap bg-surface p-1 text-right font-medium text-muted" title={drv.name}>
                             {drv.name.length > 12 ? `${drv.name.slice(0, 11)}…` : drv.name}
                           </th>
                           {preview.demands.map((_, j) => {
@@ -214,10 +216,10 @@ export default function DispatchConsole() {
                               <td
                                 key={j}
                                 onClick={() => setSelected({ i, j })}
-                                className={`h-7 w-7 cursor-pointer text-center align-middle ${isSelectedCell ? 'ring-2 ring-ops-600 ring-inset' : ''} ${isChosen ? 'border-2 border-emerald-500' : 'border border-white'}`}
+                                className={`h-7 w-7 cursor-pointer text-center align-middle ${isSelectedCell ? 'ring-2 ring-ops-600 ring-inset' : ''} ${isChosen ? 'border-2 border-emerald-500' : 'border border-surface'}`}
                                 style={
                                   infeasible
-                                    ? { background: '#e5e7eb', backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, #9ca3af 2px, #9ca3af 3px)' }
+                                    ? { background: 'rgb(var(--c-elevated))', backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgb(var(--c-faint)) 2px, rgb(var(--c-faint)) 3px)' }
                                     : { background: lerpColor(t) }
                                 }
                                 title={infeasible ? 'Infeasible pair' : `Cost ${cost.toFixed(1)}`}
@@ -231,15 +233,15 @@ export default function DispatchConsole() {
                 </div>
 
                 {/* Detail panel */}
-                <div className="w-full shrink-0 rounded-lg border border-gray-100 p-3 lg:w-64">
+                <div className="w-full shrink-0 rounded-lg border border-line-soft p-3 lg:w-64">
                   {!selected ? (
-                    <div className="flex h-full flex-col items-center justify-center gap-1 py-8 text-center text-xs text-gray-400">
+                    <div className="flex h-full flex-col items-center justify-center gap-1 py-8 text-center text-xs text-faint">
                       <Info size={18} />
                       Click a cell to see its full cost breakdown
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-xs font-semibold text-gray-800">
+                      <p className="text-xs font-semibold text-ink">
                         {preview.drivers[selected.i]?.name} → R{selected.j + 1}
                       </p>
                       {chosenMap.has(`${selected.i}:${selected.j}`) ? (
@@ -248,7 +250,7 @@ export default function DispatchConsole() {
                         <Badge tone="gray">Not selected</Badge>
                       )}
                       {selectedDetail?.breakdown ? (
-                        <div className="space-y-1 border-t border-gray-100 pt-2">
+                        <div className="space-y-1 border-t border-line-soft pt-2">
                           <BreakdownRow label="ETA" value={selectedDetail.breakdown.eta} />
                           <BreakdownRow label="Lateness" value={selectedDetail.breakdown.lateness} />
                           <BreakdownRow label="Priority" value={selectedDetail.breakdown.priority} />
@@ -257,13 +259,13 @@ export default function DispatchConsole() {
                           <BreakdownRow label="Break urgency" value={selectedDetail.breakdown.breakUrgency} />
                           <BreakdownRow label="Rejection history" value={selectedDetail.breakdown.rejectionHistory} />
                           <BreakdownRow label="Detour" value={selectedDetail.breakdown.detour} />
-                          <div className="flex items-center justify-between border-t border-gray-100 pt-1 text-xs font-bold">
+                          <div className="flex items-center justify-between border-t border-line-soft pt-1 text-xs font-bold">
                             <span>Total</span>
                             <span className="tabular-nums">{selectedDetail.breakdown.total.toFixed(2)}</span>
                           </div>
                         </div>
                       ) : (
-                        <p className="border-t border-gray-100 pt-2 text-xs text-gray-500">
+                        <p className="border-t border-line-soft pt-2 text-xs text-muted">
                           Raw cost: <span className="font-medium tabular-nums">{selectedDetail?.cost.toFixed(1)}</span>
                           <br />Only cells the optimizer actually chose carry a full breakdown.
                         </p>

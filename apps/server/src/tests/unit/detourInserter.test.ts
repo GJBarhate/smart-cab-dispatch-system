@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { breaksAnyExistingDeadline, capacityHoldsThroughout, insertAt, type DetourStop } from '../../services/dispatch/DetourInserter';
+import {
+  breaksAnyExistingDeadline,
+  capacityHoldsThroughout,
+  createEvaluationBudget,
+  insertAt,
+  type DetourStop
+} from '../../services/dispatch/DetourInserter';
 
 function stop(kind: 'pickup' | 'drop', seats: number, luggage = seats): DetourStop {
   return { kind, guestIds: [], locationId: null, coordinates: { lat: 0, lng: 0 }, label: '', seats, luggage };
@@ -59,5 +65,33 @@ describe('breaksAnyExistingDeadline', () => {
   it('returns true when completion would slip past the deadline', () => {
     const deadline = new Date('2026-08-10T09:20:00.000Z'); // 20min out
     expect(breaksAnyExistingDeadline(30 * 60, now, deadline)).toBe(true);
+  });
+});
+
+describe('evaluation budget', () => {
+  // The per-call cap bounds one demand, but the engine calls findBest once per
+  // waiting entry — so without a budget shared across the tick, the real
+  // ceiling is cap x queueDepth. At a queue of 12 that was thousands of
+  // routing round trips in a single tick.
+  it('starts with the full allowance', () => {
+    expect(createEvaluationBudget(300).remaining).toBe(300);
+  });
+
+  it('is exhausted once spent, so later demands in the same tick stop early', () => {
+    const budget = createEvaluationBudget(2);
+    budget.remaining -= 2;
+    expect(budget.remaining).toBeLessThanOrEqual(0);
+  });
+
+  it('is a shared reference, not copied per demand', () => {
+    // findBest decrements the caller's object; if it were cloned, each entry
+    // would silently get a fresh allowance and the cap would not bind.
+    const budget = createEvaluationBudget(10);
+    const spend = (b: { remaining: number }) => {
+      b.remaining -= 4;
+    };
+    spend(budget);
+    spend(budget);
+    expect(budget.remaining).toBe(2);
   });
 });

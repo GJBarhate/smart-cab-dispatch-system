@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Phone, Plane, Train, Car, Clock, Users, Sparkles, CheckCircle2, Maximize2 } from 'lucide-react';
+import { Phone, Plane, Train, Car, Clock, Users, Sparkles, CheckCircle2, Maximize2, AlertCircle } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -64,7 +64,7 @@ export default function Home(): JSX.Element {
 
   if (guestLoading || tripLoading) {
     return (
-      <div className="space-y-4 p-4">
+      <div className="space-y-4 p-4 pb-6">
         <CardSkeleton />
         <CardSkeleton />
       </div>
@@ -82,10 +82,12 @@ export default function Home(): JSX.Element {
   if (!guest) return <div className="p-4" />;
 
   return (
-    <div className="space-y-4 p-4 pb-6">
+    // er-stagger fades the cards up in sequence, so the screen assembles itself
+    // on open rather than snapping in fully formed.
+    <div className="er-stagger space-y-4 p-4 pb-6">
       <div>
-        <p className="text-sm text-gray-500">Welcome back,</p>
-        <h1 className="text-xl font-bold text-gray-900">{guest.name}</h1>
+        <p className="text-sm text-muted">Welcome back,</p>
+        <h1 className="er-gradient-text text-xl font-bold tracking-tight">{guest.name}</h1>
       </div>
 
       <InstallPrompt />
@@ -104,9 +106,11 @@ export default function Home(): JSX.Element {
 
       {guest.status === 'completed' && (
         <Card className="text-center">
-          <CheckCircle2 className="mx-auto mb-2 h-10 w-10 text-emerald-500" />
-          <p className="font-semibold text-gray-800">Your last ride is complete</p>
-          <p className="mt-1 text-sm text-gray-500">We hope you had a smooth trip.</p>
+          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
+            <CheckCircle2 className="h-7 w-7 text-emerald-500" />
+          </div>
+          <p className="font-semibold text-ink">Your last ride is complete</p>
+          <p className="mt-1 text-sm text-muted">We hope you had a smooth trip.</p>
           <Link to="/trips">
             <Button variant="secondary" className="mt-3">
               View trip history
@@ -117,8 +121,11 @@ export default function Home(): JSX.Element {
 
       {guest.status === 'no_show' && (
         <Card className="text-center">
-          <p className="font-semibold text-gray-800">Marked as no-show for your last pickup</p>
-          <p className="mt-1 text-sm text-gray-500">If this is a mistake, contact the event help desk.</p>
+          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50">
+            <AlertCircle className="h-7 w-7 text-amber-500" />
+          </div>
+          <p className="font-semibold text-ink">Marked as no-show for your last pickup</p>
+          <p className="mt-1 text-sm text-muted">If this is a mistake, contact the event help desk.</p>
         </Card>
       )}
 
@@ -146,19 +153,19 @@ function RegisteredCard({ guest, hasActiveRequest }: { guest: GuestMe; hasActive
 
       {arrival?.scheduledAt ? (
         <>
-          <p className="mt-2 text-2xl font-bold text-gray-900">{format(new Date(arrival.scheduledAt), 'd MMM, HH:mm')}</p>
-          <p className="text-sm text-gray-500">
+          <p className="mt-2 text-2xl font-bold text-ink">{format(new Date(arrival.scheduledAt), 'd MMM, HH:mm')}</p>
+          <p className="text-sm text-muted">
             {arrival.identifier ? `${arrival.identifier} · ` : ''}
             {arrival.pickupLocationId?.name ?? 'Pickup point to be confirmed'}
             {arrival.terminal && !arrival.pickupLocationId?.name?.includes(arrival.terminal) ? ` (${arrival.terminal})` : ''}
           </p>
         </>
       ) : (
-        <p className="mt-2 text-sm text-gray-500">Your arrival details will appear here once confirmed.</p>
+        <p className="mt-2 text-sm text-muted">Your arrival details will appear here once confirmed.</p>
       )}
 
       {guest.accommodationId && (
-        <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600">Staying at {guest.accommodationId.name}</div>
+        <div className="mt-3 rounded-xl bg-elevated px-3 py-2 text-sm text-muted">Staying at {guest.accommodationId.name}</div>
       )}
 
       <p className="mt-4 rounded-xl bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700">
@@ -190,8 +197,8 @@ function QueuedCard({ waitingSince, hasActiveRequest }: { waitingSince: string |
       <div className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-brand-50">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
       </div>
-      <p className="text-lg font-bold text-gray-900">Finding your driver…</p>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="text-lg font-bold text-ink">Finding your driver…</p>
+      <p className="mt-1 text-sm text-muted">
         {elapsed !== null ? `Waiting ${formatWait(elapsed)}` : 'A car is being assigned automatically'}
       </p>
       <p className="mt-3 rounded-xl bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700">
@@ -230,10 +237,13 @@ function AssignedCard({
         {trip.groupSplitId && <Badge tone="warning">Convoy</Badge>}
       </div>
 
+      {/* Deliberately fixed colours, not theme tokens: this is the plate the
+          guest holds up to the driver, so it must stay maximum-contrast white
+          on near-black in both themes. */}
       <div className="mt-3 rounded-2xl bg-gray-900 px-4 py-5 text-center text-white">
-        <p className="text-xs uppercase tracking-widest text-gray-300">Vehicle number</p>
+        <p className="text-xs uppercase tracking-widest text-gray-400">Vehicle number</p>
         <p className="mt-1 text-4xl font-extrabold tracking-wider">{vehicleNumber}</p>
-        <p className="mt-1 text-sm text-gray-300">{driverName}</p>
+        <p className="mt-1 text-sm text-gray-400">{driverName}</p>
       </div>
 
       <div className="mt-4 flex items-center justify-between rounded-xl bg-brand-50 px-4 py-3">
@@ -241,11 +251,11 @@ function AssignedCard({
           <Clock className="h-5 w-5" />
           <span className="text-sm font-medium">ETA to pickup</span>
         </div>
-        <span className="text-lg font-bold text-brand-800">{formatEta(etaSeconds)}</span>
+        <span className="er-nums text-2xl font-bold text-brand-800">{formatEta(etaSeconds)}</span>
       </div>
 
       {coPassengers.length > 0 && (
-        <div className="mt-3 flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600">
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-elevated px-3 py-2 text-sm text-muted">
           <Users className="h-4 w-4" />
           You're sharing this ride with {coPassengers.length} other guest{coPassengers.length > 1 ? 's' : ''}.
         </div>
@@ -296,14 +306,18 @@ function InTransitCard({
           drop={drop ? { lat: drop[0], lng: drop[1] } : null}
           polyline={[]}
         />
-        <Link to="/track" className="absolute right-3 top-3 z-[1000] flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-md">
-          <Maximize2 className="h-4 w-4 text-gray-700" />
+        <Link
+          to="/track"
+          aria-label="View full-screen map"
+          className="absolute right-3 top-3 z-[1000] flex h-12 w-12 items-center justify-center rounded-full bg-surface shadow-lg ring-1 ring-line active:scale-95"
+        >
+          <Maximize2 className="h-5 w-5 text-muted" />
         </Link>
       </div>
       <div className="flex items-center justify-between p-4">
         <div>
-          <p className="text-sm font-medium text-gray-500">Drop-off ETA</p>
-          <p className="text-2xl font-bold text-gray-900">{formatEta(etaSeconds)}</p>
+          <p className="text-sm font-medium text-muted">Drop-off ETA</p>
+          <p className="text-2xl font-bold text-ink">{formatEta(etaSeconds)}</p>
         </div>
         <div className="flex items-center gap-1 text-emerald-600">
           <Sparkles className="h-4 w-4" />

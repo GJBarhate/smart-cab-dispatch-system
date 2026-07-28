@@ -6,6 +6,20 @@
     <meta name="theme-color" content="#6d28d9" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>EventRide Ops</title>
+    <script>
+      // Applies the saved theme before first paint. Without this the app
+      // renders one light frame and then snaps to dark on hydration.
+      // Key must match THEME_STORAGE_KEY in src/store/themeStore.ts.
+      (function () {
+        try {
+          var saved = localStorage.getItem('eventride-admin-theme');
+          var dark = saved === 'dark' || (saved === null && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {
+          /* storage blocked — fall back to the light default */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

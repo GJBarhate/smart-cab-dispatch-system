@@ -51,18 +51,18 @@ export default function QueueMonitor() {
     <div className="p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Queue Monitor</h1>
-          <p className="text-sm text-gray-500">
+          <h1 className="text-lg font-semibold text-ink">Queue Monitor</h1>
+          <p className="text-sm text-muted">
             Rows turn amber past 15 min, red past the starvation threshold ({starvationMin} min) — the point at which the sweeper force-matches greedily.
           </p>
         </div>
-        <div className="flex gap-1 rounded-lg border border-gray-200 bg-white p-1">
+        <div className="flex gap-1 rounded-lg border border-line bg-surface p-1">
           {STATUS_FILTERS.map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${
-                statusFilter === s ? 'bg-ops-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+              className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ops-600 ${
+                statusFilter === s ? 'bg-ops-600 text-white' : 'text-muted hover:bg-elevated'
               }`}
             >
               {s}
@@ -80,8 +80,8 @@ export default function QueueMonitor() {
           <div className="p-4"><EmptyState icon={ListOrdered} title="Queue is empty" description={`No entries with status "${statusFilter}".`} /></div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+            <table className="er-table w-full min-w-[900px] text-sm">
+              <thead className="border-b border-line-soft bg-elevated text-left text-xs font-medium uppercase tracking-wide text-muted">
                 <tr>
                   <th className="px-4 py-2.5">Guest(s)</th>
                   <th className="px-4 py-2.5">Type</th>
@@ -93,7 +93,7 @@ export default function QueueMonitor() {
                   <th className="px-4 py-2.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-line-soft">
                 {rows.map(({ entry, waitMin, tier }) => (
                   <tr
                     key={entry.id}
@@ -102,13 +102,13 @@ export default function QueueMonitor() {
                     <td className="px-4 py-2.5">{entry.guestIds.length} guest{entry.guestIds.length > 1 ? 's' : ''} · {entry.seats} seats</td>
                     <td className="px-4 py-2.5"><Badge>{titleCase(entry.type)}</Badge></td>
                     <td className="max-w-[220px] truncate px-4 py-2.5">{entry.pickup.label} → {entry.dropoff.label}</td>
-                    <td className={`px-4 py-2.5 font-medium ${tier === 'red' ? 'text-red-700' : tier === 'amber' ? 'text-amber-700' : 'text-gray-700'}`}>
+                    <td className={`px-4 py-2.5 font-medium ${tier === 'red' ? 'text-red-700' : tier === 'amber' ? 'text-amber-700' : 'text-muted'}`}>
                       {fmtWaitMinutes(entry.enqueuedAt)}
                       {waitMin >= starvationMin && <span className="ml-1 text-[10px] uppercase">starving</span>}
                     </td>
                     <td className="px-4 py-2.5 tabular-nums">{entry.priorityScore.toFixed(1)}</td>
                     <td className="px-4 py-2.5">{entry.attempts}</td>
-                    <td className="max-w-[220px] truncate px-4 py-2.5 text-xs text-gray-500">{entry.lastFailureReason || '—'}</td>
+                    <td className="max-w-[220px] truncate px-4 py-2.5 text-xs text-muted">{entry.lastFailureReason || '—'}</td>
                     <td className="px-4 py-2.5 text-right">
                       <Button size="sm" variant="secondary" onClick={() => boostMutation.mutate(entry.id)} loading={boostMutation.isPending}>
                         <Zap size={12} /> Boost

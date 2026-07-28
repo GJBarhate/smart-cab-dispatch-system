@@ -1,5 +1,10 @@
 import { useMemo, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+// Leaflet's own CSS and the default-icon fix travel with the map, so routes
+// that never show one do not pay for them. Both are idempotent across the two
+// map components that import them.
+import 'leaflet/dist/leaflet.css';
+import './leafletSetup';
 import { toLeafletTuple, isZeroPoint } from '../../lib/geo';
 import { carDivIcon, pinDivIcon, DRIVER_STATUS_LABEL } from './driverIcons';
 import type { DriverStatus, GeoPoint } from '../../types/models';
@@ -86,7 +91,7 @@ export function LiveOpsMap({ drivers, pickups = [], onSelectDriver, className = 
                 <div className="text-xs">
                   <p className="font-semibold">{d.name}</p>
                   <p>{DRIVER_STATUS_LABEL[d.status]}</p>
-                  {d.vehicleNumber && <p className="text-gray-500">{d.vehicleNumber}</p>}
+                  {d.vehicleNumber && <p className="text-muted">{d.vehicleNumber}</p>}
                 </div>
               </Popup>
             </Marker>

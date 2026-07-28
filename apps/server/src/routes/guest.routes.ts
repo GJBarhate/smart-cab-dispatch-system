@@ -7,7 +7,7 @@ import { Location } from '../models/Location';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validate } from '../middleware/validate';
 import { requireAuth, requireRole } from '../middleware/auth';
-import { NotFoundError, ConflictError, ForbiddenError } from '../utils/errors';
+import { NotFoundError, ConflictError, ForbiddenError, StaleSessionError } from '../utils/errors';
 import { toGeoPoint } from '../utils/geo';
 
 export const guestRouter = Router();
@@ -37,7 +37,7 @@ guestRouter.get(
   '/me',
   asyncHandler(async (req, res) => {
     const guest = await Guest.findById(guestId(req)).populate('accommodationId').populate('arrival.pickupLocationId');
-    if (!guest) throw new NotFoundError('Guest');
+    if (!guest) throw new StaleSessionError('Guest');
     res.json({ ok: true, data: guest });
   })
 );
@@ -46,7 +46,7 @@ guestRouter.get(
   '/trip/current',
   asyncHandler(async (req, res) => {
     const guest = await Guest.findById(guestId(req));
-    if (!guest) throw new NotFoundError('Guest');
+    if (!guest) throw new StaleSessionError('Guest');
 
     if (!guest.currentTripId) {
       res.json({ ok: true, data: null });

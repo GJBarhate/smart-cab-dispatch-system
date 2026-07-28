@@ -2,6 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme tokens — identical contract to the admin app so a component copied
+   between the two keeps working. See apps/admin/src/index.css for the
+   reasoning behind the channel-triplet form. */
+@layer base {
+  :root {
+    color-scheme: light;
+
+    --c-canvas: 249 250 251;
+    --c-surface: 255 255 255;
+    --c-elevated: 243 244 246;
+    --c-line: 229 231 235;
+    --c-line-soft: 243 244 246;
+    --c-ink: 17 24 39;
+    --c-muted: 91 100 114;
+    /* Darkened from 154 163 175, which was 2.5:1 on a white card — well under
+       the 4.5:1 WCAG AA needs for normal text, and this token carries the 11px
+       labels and timestamps where it matters most. Now 5.29:1 on surface and
+       4.81:1 on elevated, still a step lighter than --c-muted. */
+    --c-faint: 100 108 122;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    --c-canvas: 11 14 20;
+    --c-surface: 20 25 34;
+    --c-elevated: 28 34 46;
+    --c-line: 42 50 64;
+    --c-line-soft: 33 41 54;
+    --c-ink: 232 236 243;
+    --c-muted: 163 173 190;
+    /* Lightened from 107 118 134 (3.5:1 on an elevated panel — large text only).
+       Now 4.74:1 there and 5.75:1 on canvas. */
+    --c-faint: 130 141 157;
+  }
+
+  html {
+    background-color: rgb(var(--c-canvas));
+  }
+}
+
 html, body, #root {
   height: 100%;
 }
@@ -9,4 +50,517 @@ html, body, #root {
 body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+}
+
+/* See the admin stylesheet: OSM raster tiles have no dark style, so the dark
+   basemap is produced by inverting the tile pane only. */
+.dark .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
+}
+
+.dark .leaflet-container {
+  background: rgb(var(--c-elevated));
+}
+
+.dark .leaflet-control-attribution,
+.dark .leaflet-bar a {
+  background: rgb(var(--c-surface));
+  color: rgb(var(--c-muted));
+}
+
+.dark .leaflet-bar a {
+  border-color: rgb(var(--c-line));
+}
+
+/* ---------------------------------------------------------------------------
+   Accent tints in dark mode.
+
+   The -50/-100 steps are near-white by design: perfect as a wash behind a
+   badge or callout on a white card, glaring as a bright patch on a dark one.
+   Remapping the tint utilities once here — to a low-alpha wash of the same
+   hue, with the -600/-700/-800 text steps lifted to a lighter tone that stays
+   legible on it — keeps every badge, toast, alert and status pill correct
+   without hanging a `dark:` variant on each of ~45 call sites.
+
+   `.dark .x` (0,2,0) outranks the `.x` utility (0,1,0), so no !important.
+--------------------------------------------------------------------------- */
+
+.dark .bg-red-50,     .dark .bg-red-100     { background-color: rgb(248 113 113 / 0.15); }
+.dark .bg-amber-50,   .dark .bg-amber-100   { background-color: rgb(251 191 36 / 0.15); }
+.dark .bg-emerald-50, .dark .bg-emerald-100 { background-color: rgb(52 211 153 / 0.15); }
+.dark .bg-blue-50,    .dark .bg-blue-100    { background-color: rgb(96 165 250 / 0.15); }
+.dark .bg-brand-50,   .dark .bg-brand-100   { background-color: rgb(96 165 250 / 0.15); }
+.dark .bg-ops-50,     .dark .bg-ops-100     { background-color: rgb(167 139 250 / 0.16); }
+
+.dark .hover\:bg-ops-50:hover   { background-color: rgb(167 139 250 / 0.16); }
+.dark .hover\:bg-red-50:hover   { background-color: rgb(248 113 113 / 0.15); }
+.dark .active\:bg-brand-100:active { background-color: rgb(96 165 250 / 0.24); }
+
+.dark .text-red-600,     .dark .text-red-700,     .dark .text-red-800     { color: rgb(252 165 165); }
+.dark .text-amber-700,   .dark .text-amber-800    { color: rgb(252 211 77); }
+.dark .text-emerald-700, .dark .text-emerald-800  { color: rgb(110 231 183); }
+.dark .text-blue-700,    .dark .text-blue-800     { color: rgb(147 197 253); }
+.dark .text-brand-600,   .dark .text-brand-700,   .dark .text-brand-800   { color: rgb(147 197 253); }
+.dark .text-ops-600,     .dark .text-ops-700      { color: rgb(196 181 253); }
+
+.dark .border-red-200     { border-color: rgb(248 113 113 / 0.32); }
+.dark .border-amber-200   { border-color: rgb(251 191 36 / 0.32); }
+.dark .border-emerald-200 { border-color: rgb(52 211 153 / 0.32); }
+.dark .border-brand-100   { border-color: rgb(96 165 250 / 0.32); }
+.dark .border-ops-100     { border-color: rgb(167 139 250 / 0.32); }
+
+/* Ring colours need the same treatment as borders. Tailwind composes rings
+   through --tw-ring-color, so overriding that variable is enough — restating
+   the whole box-shadow would fight the ring-inset/ring-offset utilities. */
+/* `ring-line` needs no entry: it resolves through the --c-line token, which
+   already flips with the theme. Only the literal palette steps need remapping. */
+.dark .ring-red-200       { --tw-ring-color: rgb(248 113 113 / 0.32); }
+.dark .ring-amber-200     { --tw-ring-color: rgb(251 191 36 / 0.32); }
+.dark .ring-emerald-200   { --tw-ring-color: rgb(52 211 153 / 0.32); }
+.dark .ring-brand-100,
+.dark .ring-brand-200     { --tw-ring-color: rgb(96 165 250 / 0.32); }
+
+/* Table-row severity washes on the Queue Monitor sit on top of a surface, so
+   they need slightly more presence than a badge tint to still read as a row. */
+.dark tr.bg-red-50   { background-color: rgb(248 113 113 / 0.13); }
+.dark tr.bg-amber-50 { background-color: rgb(251 191 36 / 0.12); }
+
+/* ---------------------------------------------------------------------------
+   Dialog entrance.
+
+   A modal that appears instantly reads as a rendering glitch; ~180ms of motion
+   is enough to show it came from somewhere. The sheet slides up from the thumb
+   on phones and scales in on tablet-and-up, matching where it sits on screen.
+--------------------------------------------------------------------------- */
+
+@keyframes er-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes er-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes er-slide-up {
+  from { transform: translateY(100%); }
+  to   { transform: none; }
+}
+
+.er-backdrop { animation: er-fade-in 150ms ease-out; }
+.er-sheet    { animation: er-slide-up 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+@media (min-width: 640px) {
+  .er-sheet { animation: er-pop-in 180ms cubic-bezier(0.16, 1, 0.3, 1); }
+}
+
+/* ---------------------------------------------------------------------------
+   Aurora background + glass + 3D tilt. Same contract as the admin stylesheet.
+
+   Used on the sign-in screen only. This is a phone app a guest opens while
+   walking out of an airport — a live tracking map with a drifting backdrop
+   behind it would be both distracting and a battery cost. Sign-in is the one
+   screen with nothing time-critical on it.
+
+   Blob sizes are smaller than the admin's: on a 360px-wide viewport the
+   desktop sizes push the blur radius past the viewport and flatten into a
+   single wash.
+--------------------------------------------------------------------------- */
+
+.er-aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.er-aurora::after {
+  /* Grain — kills the banding large low-contrast gradients show on phone
+     panels, which are overwhelmingly 8-bit. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.3;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+.er-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.5;
+  animation: er-drift 24s ease-in-out infinite alternate;
+}
+
+.dark .er-blob {
+  mix-blend-mode: screen;
+  opacity: 0.4;
+}
+
+.er-blob-1 {
+  width: 20rem;
+  height: 20rem;
+  top: -5rem;
+  left: -4rem;
+  background: radial-gradient(circle at 30% 30%, #2563eb, transparent 70%);
+}
+
+.er-blob-2 {
+  width: 18rem;
+  height: 18rem;
+  bottom: -4rem;
+  right: -4rem;
+  background: radial-gradient(circle at 70% 70%, #0891b2, transparent 70%);
+  animation-duration: 29s;
+  animation-delay: -7s;
+}
+
+.er-blob-3 {
+  width: 15rem;
+  height: 15rem;
+  top: 40%;
+  right: 12%;
+  background: radial-gradient(circle at 50% 50%, #7c3aed, transparent 70%);
+  animation-duration: 33s;
+  animation-delay: -15s;
+  opacity: 0.3;
+}
+
+@keyframes er-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(2.5rem, 2rem, 0) scale(1.14); }
+  to   { transform: translate3d(-1.5rem, 2.5rem, 0) scale(0.94); }
+}
+
+.er-glass {
+  background: rgb(var(--c-surface) / 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgb(255 255 255 / 0.55);
+  box-shadow: 0 20px 50px -12px rgb(0 0 0 / 0.25), inset 0 1px 0 0 rgb(255 255 255 / 0.6);
+}
+
+.dark .er-glass {
+  background: rgb(var(--c-surface) / 0.6);
+  border-color: rgb(255 255 255 / 0.09);
+  box-shadow: 0 20px 50px -12px rgb(0 0 0 / 0.6), inset 0 1px 0 0 rgb(255 255 255 / 0.07);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .er-glass { background: rgb(var(--c-surface) / 0.97); }
+}
+
+.er-tilt-scene { perspective: 1100px; }
+
+/* No `preserve-3d`: only one plane rotates, so a 3D rendering context would
+   add nothing except z-sorting ambiguity between the sheen and the form. */
+.er-tilt {
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0);
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.er-tilt-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--sheen, 0);
+  background: radial-gradient(
+    18rem circle at var(--mx, 50%) var(--my, 50%),
+    rgb(255 255 255 / 0.4),
+    transparent 45%
+  );
+  transition: opacity 260ms ease-out;
+}
+
+.dark .er-tilt-sheen {
+  background: radial-gradient(
+    18rem circle at var(--mx, 50%) var(--my, 50%),
+    rgb(255 255 255 / 0.11),
+    transparent 45%
+  );
+}
+
+/* ===========================================================================
+   ADVANCED SURFACE SYSTEM
+
+   The admin stylesheet's counterpart, trimmed for a phone. Two things are
+   deliberately missing: the pointer spotlight (there is no hovering cursor on
+   a touch screen, so it would light a card and strand it lit) and the table
+   polish (no tables on a 360px viewport). Everything that survives is either
+   one-shot or driven by touch, so nothing animates on its own while a guest
+   watches a live tracking map — that is battery the app has no right to spend.
+   ========================================================================= */
+
+/* --- Elevation ------------------------------------------------------------
+   A contact shadow plus an ambient one. Kept shallower than the admin's: on a
+   phone, cards sit nearly edge-to-edge and a deep shadow just muddies the
+   narrow gutter between them. */
+
+.er-elev-1 {
+  box-shadow:
+    0 1px 2px -1px rgb(0 0 0 / 0.08),
+    0 2px 6px -2px rgb(0 0 0 / 0.06);
+}
+
+.er-elev-2 {
+  box-shadow:
+    0 1px 2px -1px rgb(0 0 0 / 0.1),
+    0 4px 12px -3px rgb(0 0 0 / 0.1);
+}
+
+.dark .er-elev-1 {
+  box-shadow:
+    0 1px 2px -1px rgb(0 0 0 / 0.5),
+    0 2px 6px -2px rgb(0 0 0 / 0.4),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+}
+
+.dark .er-elev-2 {
+  box-shadow:
+    0 2px 4px -2px rgb(0 0 0 / 0.6),
+    0 8px 20px -6px rgb(0 0 0 / 0.5),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06);
+}
+
+/* --- Press feedback -------------------------------------------------------
+   Touch has no hover state, so the press *is* the entire interaction. A scale
+   step gives the immediate physical acknowledgement a phone user expects while
+   the network request is still in flight. */
+
+.er-press {
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 140ms ease-out;
+}
+
+.er-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* --- Button sheen ---------------------------------------------------------
+   One diagonal pass of light, on the filled variants only. */
+
+.er-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.er-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / 0.24) 50%, transparent 70%);
+  transform: translateX(-100%);
+  transition: opacity 150ms ease-out;
+}
+
+.er-btn:active:not(:disabled)::after {
+  opacity: 1;
+  animation: er-btn-sheen 620ms ease-out;
+}
+
+@keyframes er-btn-sheen {
+  to { transform: translateX(100%); }
+}
+
+/* --- Shimmer skeletons ---------------------------------------------------- */
+
+.er-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.er-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.45), transparent);
+  animation: er-shimmer-sweep 1.6s ease-in-out infinite;
+}
+
+.dark .er-shimmer::after {
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.07), transparent);
+}
+
+@keyframes er-shimmer-sweep {
+  to { transform: translateX(100%); }
+}
+
+/* --- Entrance stagger -----------------------------------------------------
+   Capped at 10 children for the same reason as the admin: past that the delay
+   stops reading as polish and starts reading as lag. `backwards` fill keeps
+   each element hidden through its delay instead of flashing first. */
+
+.er-stagger > * {
+  animation: er-rise-in 380ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.er-stagger > *:nth-child(1)  { animation-delay: 0ms; }
+.er-stagger > *:nth-child(2)  { animation-delay: 45ms; }
+.er-stagger > *:nth-child(3)  { animation-delay: 90ms; }
+.er-stagger > *:nth-child(4)  { animation-delay: 135ms; }
+.er-stagger > *:nth-child(5)  { animation-delay: 180ms; }
+.er-stagger > *:nth-child(6)  { animation-delay: 225ms; }
+.er-stagger > *:nth-child(7)  { animation-delay: 270ms; }
+.er-stagger > *:nth-child(8)  { animation-delay: 315ms; }
+.er-stagger > *:nth-child(n+9) { animation-delay: 360ms; }
+
+@keyframes er-rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- Live indicator -------------------------------------------------------
+   The only thing allowed to animate indefinitely, because the animation is the
+   information: it distinguishes a live ETA from a frozen one. */
+
+.er-live-dot {
+  position: relative;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: rgb(16 185 129);
+  flex: none;
+}
+
+.er-live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: er-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.er-live-dot[data-stale='true'] {
+  background: rgb(148 163 184);
+}
+
+/* A dropped feed must stop pinging — that is the false reassurance this
+   indicator exists to prevent. */
+.er-live-dot[data-stale='true']::after {
+  animation: none;
+}
+
+@keyframes er-ping {
+  75%, 100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* --- Numerals -------------------------------------------------------------
+   Tabular figures for anything that updates in place — without them a ticking
+   ETA changes width and nudges the layout on every refresh. */
+
+.er-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* --- Gradient text -------------------------------------------------------- */
+
+.er-gradient-text {
+  background: linear-gradient(120deg, #2563eb, #0891b2 55%, #7c3aed);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.dark .er-gradient-text {
+  background: linear-gradient(120deg, #60a5fa, #22d3ee 55%, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@media (forced-colors: active) {
+  .er-gradient-text {
+    background: none;
+    color: CanvasText;
+  }
+}
+
+/* --- Scrollbars and selection --------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line)) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--c-line));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::selection {
+  background: rgb(37 99 235 / 0.24);
+}
+
+/* --- Focus ----------------------------------------------------------------
+   :focus-visible only, so tapping a button never paints a ring but tabbing to
+   it always does. */
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgb(37 99 235);
+  outline-offset: 2px;
+}
+
+.dark a:focus-visible,
+.dark button:focus-visible,
+.dark input:focus-visible,
+.dark select:focus-visible,
+.dark textarea:focus-visible,
+.dark [tabindex]:focus-visible {
+  outline-color: rgb(96 165 250);
+}
+
+/* Honour the OS "reduce motion" setting: vestibular triggers are a real
+   accessibility issue, and the app conveys nothing through motion alone. The
+   aurora keeps its colour and simply stops drifting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    /* The delays matter as much as the durations: `.er-stagger` fills
+       `backwards`, so a surviving 360ms delay would leave the last cards
+       genuinely invisible rather than merely un-animated. */
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .er-blob { animation: none; }
+  .er-tilt { transform: none !important; }
+  .er-tilt-sheen { opacity: 0 !important; }
+
+  /* Switch the ambient effects off outright rather than running them
+     instantly: a 0.01ms shimmer would leave a bright band frozen across the
+     skeleton, and an instant ping would freeze mid-expansion. */
+  .er-shimmer::after { animation: none; opacity: 0; }
+  .er-live-dot::after { animation: none; opacity: 0; }
+  .er-btn::after { animation: none; opacity: 0 !important; }
+  .er-btn:active:not(:disabled) { transform: none; }
+  .er-press:active:not(:disabled) { transform: none; }
 }

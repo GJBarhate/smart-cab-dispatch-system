@@ -4,6 +4,7 @@ import { logger } from '../config/logger';
 import { runDispatchTick } from './dispatchTick.job';
 import { runReoptimize } from './reoptimize.job';
 import { runStarvationSweep } from './starvationSweep.job';
+import { runArrivalSweep } from './arrivalSweep.job';
 import { runKeepalive } from './keepalive.job';
 
 const tasks: Array<ReturnType<typeof cron.schedule>> = [];
@@ -22,6 +23,11 @@ export function startScheduler(): void {
   schedule(env.DISPATCH_TICK_CRON, 'dispatch-tick', runDispatchTick);
   schedule(env.REOPTIMIZE_CRON, 'reoptimize', runReoptimize);
   schedule(env.STARVATION_SWEEP_CRON, 'starvation-sweep', runStarvationSweep);
+  // Feeds the queue from scheduled arrivals — must run before the tick has
+  // anything to match, so it gets its own (slower) cadence.
+  schedule(env.ARRIVAL_SWEEP_CRON, 'arrival-sweep', async () => {
+    await runArrivalSweep();
+  });
 
   if (env.KEEPALIVE_URL) {
     schedule('*/14 * * * *', 'keepalive', runKeepalive);

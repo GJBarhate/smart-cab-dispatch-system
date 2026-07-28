@@ -293,6 +293,11 @@ export interface DashboardData {
   alerts: Alert[];
 }
 
+export interface HistogramBucket {
+  bucket: string;
+  count: number;
+}
+
 export interface AnalyticsData {
   avgWaitMin: number;
   p95WaitMin: number;
@@ -300,6 +305,50 @@ export interface AnalyticsData {
   driverUtilisationPct: number;
   assignmentsByStrategy: Record<string, number>;
   tripsCompleted: number;
+  waitDistribution: HistogramBucket[];
+  etaAccuracyDistribution: HistogramBucket[];
+  etaWithin2MinPct: number;
+  tripsByHour: Array<{ hour: string; trips: number; guests: number }>;
+  tripsPerDriver: Array<{ name: string; trips: number }>;
+  detourSavedMin: number;
+  sharedTripCount: number;
+}
+
+export interface AuditEntry {
+  id: string;
+  actorRole: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  at: string;
+  ip: string;
+}
+
+/** `available: false` is the shape returned when GEMINI_API_KEY is unset. */
+export interface AiAskResult {
+  available: boolean;
+  message?: string;
+  answer?: string;
+  rows?: unknown[];
+}
+
+export interface AiExplainResult {
+  explanation: string;
+  /** false when the deterministic template was returned unpolished. */
+  aiPolished: boolean;
+}
+
+export interface AiDigestResult {
+  digest: string;
+  aiPolished: boolean;
+  stats: {
+    hours: number;
+    tripsCompleted: number;
+    tripsCreated: number;
+    waitingNow: number;
+    unassignable: number;
+    oldestWaitMin: number;
+  };
 }
 
 export interface DispatchHealth {

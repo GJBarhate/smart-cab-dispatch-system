@@ -1,5 +1,9 @@
 // §16.7: Leaflet's default marker icon 404s under bundlers. Fix once, globally.
-// Import this module exactly once (main.tsx) before any MapContainer mounts.
+//
+// Imported by every component that mounts a MapContainer, not by main.tsx: ES
+// modules evaluate once no matter how many importers there are, so this still
+// runs exactly once and always before a map renders — while keeping leaflet out
+// of the bundle on routes that show no map.
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import icon2x from 'leaflet/dist/images/marker-icon-2x.png';

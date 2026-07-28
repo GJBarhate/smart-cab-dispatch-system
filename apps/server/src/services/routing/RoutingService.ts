@@ -61,7 +61,19 @@ async function withFallback<T>(run: (provider: RoutingProvider) => Promise<T>): 
     } catch (err) {
       lastErr = err;
       breaker?.recordFailure();
-      logger.warn({ err, provider: provider.name }, 'routing provider failed, trying next in chain');
+      // A provider failing is an expected, handled event — that is the entire
+      // point of the fallback chain — so log the reason, not a stack trace.
+      // Logging the full `err` here emitted ~30 lines per failure and, during
+      // a public-OSRM outage, buried every real log line in the process under
+      // thousands of identical undici frames.
+      logger.warn(
+        {
+          provider: provider.name,
+          reason: err instanceof Error ? err.message : String(err),
+          breakerOpen: breaker?.isOpen() ?? false
+        },
+        'routing provider failed, trying next in chain'
+      );
     }
   }
   // Unreachable in practice: haversine has no breaker and never throws.

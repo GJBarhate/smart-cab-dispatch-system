@@ -2,7 +2,7 @@
 
 Fully automated ride dispatch for a single private event: a fixed, pre-registered fleet serving hundreds of guests moving between an airport/railway station, several accommodations, and one venue across arrival, event, and departure phases. No guest or driver ever picks the other — matching is 100% automatic (see the automation boundary in [`DESIGN.md`](./DESIGN.md)).
 
-**Live URLs:** _add after deploying — see §14 of `plan.md` for the Render/Vercel steps._
+**Live URLs:** _add after deploying — backend on Render (root dir the repo root, build `npm ci && npm run sync && npm run build -w server`, start `node apps/server/dist/index.js`, health check `/api/health`), frontends as two Vercel projects rooted at `apps/guest` and `apps/admin`._
 **Demo video:** _add Loom link — script in [`docs/DEMO_SCRIPT.md`](./docs/DEMO_SCRIPT.md)._
 
 ### Demo credentials
@@ -24,6 +24,29 @@ Generated fresh by `npm run seed`, which prints the full table — the ones belo
 **Admin (`apps/admin`, admin role)** — ops dashboard with live KPIs and map, approval inbox, queue monitor with priority scores and starvation warnings, a Dispatch Console that visualizes the cost-matrix heatmap and every weight in the objective function, driver/guest management (including CSV import), analytics, and full audit logging on every mutation.
 
 **Driver (`apps/admin`, driver role, `/driver` only)** — one screen, one primary action at a time: accept/reject an offer (with a countdown), arrive, board, drop. No visibility into any other trip, driver, or guest.
+
+---
+
+## Interface, theming & accessibility
+
+Both apps ship a **light/dark theme** that follows the OS by default and remembers an explicit choice per app (`localStorage`). Every neutral resolves through a CSS-variable token (`--c-canvas` / `--c-surface` / `--c-elevated` / `--c-line` / `--c-ink` / `--c-muted` / `--c-faint`), so switching themes is one class on `<html>` rather than a `dark:` variant on every element. An inline bootstrap script in each `index.html` applies the stored theme **before first paint**, so a dark-mode user never sees a white flash on load. The toggle is reachable from the admin sidebar, the driver header, the guest Profile screen, **and both login screens** — a user who prefers dark shouldn't have to sign in through a bright one. OpenStreetMap ships no dark raster tiles, so the dark basemap is produced by inverting the tile pane only, leaving markers and route polylines their true colours.
+
+Other interface behaviour worth knowing:
+
+- **Destructive and session-ending actions confirm first.** Logging out opens a dialog in all three roles; the driver's copy is context-aware and warns when a trip is still in progress.
+- **Sessions that expire explain themselves.** A 401 on an authenticated call bounces the user to the login screen *with a notice*, instead of silently presenting an empty form. A 401 on the login call itself carries no token and is treated as a wrong password, not an expiry.
+- **Offline is stated, not implied.** Both apps show a banner when the browser loses its network, so frozen figures read as "no connection" rather than "the app is broken". `navigator.onLine` drives the banner only — never request gating, since it reports a link, not a reachable API.
+- **Dialogs are real dialogs**: `role="dialog"` + `aria-modal`, focus moved into the panel and restored to the trigger on close, a Tab focus trap, Escape to dismiss, and background scroll locked (which also stops the page sliding under a thumb on iOS).
+- **Motion is optional.** `prefers-reduced-motion: reduce` disables the dialog transitions and the live-marker pulse; nothing in either app is conveyed by motion alone.
+- Keyboard support throughout: a skip-to-content link past the admin's ten nav links, and visible `focus-visible` rings on every interactive control.
+
+### The sign-in treatment
+
+Both login screens use a drifting **aurora** backdrop (three blurred gradient blobs over a noise layer) behind a **frosted-glass** card that **tilts in 3D toward the pointer**, with a sheen that tracks it. Three deliberate constraints keep it from becoming a liability:
+
+- **Scoped to sign-in only.** Ops screens are read for hours and the guest app is used while walking out of an airport; a moving backdrop behind a live cost matrix or a tracking map is a distraction and a battery cost. Sign-in is the one surface with nothing time-critical on it.
+- **It costs nothing to render.** Only `transform` and `opacity` animate, so the whole effect stays on the compositor and never triggers layout or paint. Tilt values are written straight to CSS custom properties on the node — a `setState` per `pointermove` would re-render the sign-in form at pointer frequency — and are coalesced to one write per animation frame. Touch pointers are ignored entirely, so phones pay nothing for the tilt.
+- **It degrades honestly.** `prefers-reduced-motion` stops the drift and the tilt while keeping the colour. Browsers without `backdrop-filter` get a near-opaque panel via `@supports not`, so the card is never an unreadable smear. A noise layer sits over the gradients because large low-contrast gradients band visibly on 8-bit panels, and in dark mode the blobs blend with `screen` so they stay luminous instead of muddying to grey where they overlap.
 
 ---
 
@@ -135,6 +158,8 @@ ASSERTIONS
 ## API reference
 
 Full endpoint list: **[`docs/API.md`](./docs/API.md)**.
+
+> **A note on `plan.md §…` citations in the source.** Comments throughout `apps/server` cite section numbers of `plan.md`, the private build specification this system was implemented against. That file is gitignored and deliberately unpublished (it contains credentials used during development), so those citations are provenance notes rather than links you can follow. Everything they point at that matters to a reader — the cost function and every weight, the feasibility rules, the cache layers, the traffic model, the degradation strategy — is written up in **[`DESIGN.md`](./DESIGN.md)**, which is the document to read.
 
 ---
 

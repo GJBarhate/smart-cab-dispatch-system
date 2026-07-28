@@ -23,6 +23,25 @@ import type { CostBreakdown, DispatchConfig, DispatchDemand } from './types';
 const PREFILTER_RADIUS_KM = 15;
 const MAX_EVALUATIONS = 300;
 
+/**
+ * Shared allowance across every `findBest` call in one dispatch tick.
+ *
+ * `MAX_EVALUATIONS` bounds a *single* demand, but the engine calls `findBest`
+ * once per waiting entry, so the real per-tick ceiling was
+ * `MAX_EVALUATIONS x waitingEntries` — 3,600 routing round trips for a queue of
+ * 12, against a public OSRM instance. That is what pushed observed tick
+ * duration to 90-155s (and, when the provider was flaky, into the tens of
+ * minutes). Passing one budget through the whole detour phase restores the
+ * bound the comment above always claimed.
+ */
+export interface EvaluationBudget {
+  remaining: number;
+}
+
+export function createEvaluationBudget(total = MAX_EVALUATIONS): EvaluationBudget {
+  return { remaining: total };
+}
+
 export interface DetourStop {
   kind: 'pickup' | 'drop';
   guestIds: string[];
@@ -74,13 +93,27 @@ export interface DetourCandidate {
 }
 
 export const DetourInserter = {
-  async findBest(entry: DispatchDemand, cfg: DispatchConfig, now: Date = new Date()): Promise<DetourCandidate | null> {
+  /**
+   * `budget` is optional so single-demand callers (admin approval, driver
+   * rejection, the starvation sweep) keep the original per-call allowance;
+   * the tick passes one shared budget so a long queue cannot multiply it.
+   */
+  async findBest(
+    entry: DispatchDemand,
+    cfg: DispatchConfig,
+    now: Date = new Date(),
+    budget?: EvaluationBudget
+  ): Promise<DetourCandidate | null> {
+    if (budget && budget.remaining <= 0) return null;
+
     const activeTrips = await Trip.find({ status: { $in: ['en_route_pickup', 'at_pickup', 'boarded'] } });
     let best: DetourCandidate | null = null;
     let evaluations = 0;
 
+    const exhausted = (): boolean => evaluations >= MAX_EVALUATIONS || (budget !== undefined && budget.remaining <= 0);
+
     for (const trip of activeTrips) {
-      if (evaluations >= MAX_EVALUATIONS) break;
+      if (exhausted()) break;
 
       const remainingSeats = trip.vehicleSnapshot!.seats - trip.capacityUsed!.seats;
       const remainingLuggage = trip.vehicleSnapshot!.luggage - trip.capacityUsed!.luggage;
@@ -133,9 +166,10 @@ export const DetourInserter = {
         luggage: entry.luggage
       };
 
-      for (let i = 0; i <= pending.length && evaluations < MAX_EVALUATIONS; i++) {
-        for (let j = i; j <= pending.length && evaluations < MAX_EVALUATIONS; j++) {
+      for (let i = 0; i <= pending.length && !exhausted(); i++) {
+        for (let j = i; j <= pending.length && !exhausted(); j++) {
           evaluations++;
+          if (budget) budget.remaining--;
           const candidate = insertAt(pending, i, newPickup, j, newDrop);
           if (!capacityHoldsThroughout(candidate, { seats: trip.vehicleSnapshot!.seats, luggage: trip.vehicleSnapshot!.luggage })) continue;
 

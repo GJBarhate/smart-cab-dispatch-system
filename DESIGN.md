@@ -13,7 +13,7 @@ A fixed fleet serves hundreds of guests moving between an airport/railway statio
 | G1 | No guest waits unreasonably long | Superlinear wait-time term in the priority score (§5), plus a hard pre-emption rule at `starvationThresholdMin` |
 | G2 | No driver idles while guests wait | Idle-time credit in the cost function (a driver becomes *cheaper* the longer they've been idle) + a starvation-sweep cron that force-matches any waiting entry against the nearest feasible driver |
 | G3 | Seat + luggage capacity respected | Hard feasibility mask before scoring — an infeasible pair gets `BIG_M` in the cost matrix, never a soft penalty (§6) |
-| G4 | Multiple destinations handled by event phase | `TripType` driven by `EventConfig.phases`, matched against `now` |
+| G4 | Multiple destinations handled by event phase | `TripType` driven by `EventConfig.phases`, matched against `now` (`EventPhaseService`, §3.1) |
 | G5 | Allocation is fully automatic | No endpoint lets a guest pick a driver, or a driver pick a guest. See the automation boundary below. |
 
 ## 2. The automation boundary
@@ -34,6 +34,16 @@ Concretely: `POST /api/guest/requests` only ever creates a `pending_approval` `R
 ## 3. Data model — the queue as a first-class persisted entity
 
 `QueueEntry` is a real Mongoose collection, not an in-memory array. This matters for three reasons: (1) a server restart (Render free tier sleeps and cold-starts) must not lose the demand backlog; (2) `priorityScore` needs to be queryable and sortable across a tick; (3) `lockedBy`/`lockedUntil` fields let a batch tick and a real-time greedy match coexist without double-assigning the same guest. `Trip.stops` is an ordered array with its own per-stop status (`pending`/`arrived`/`done`), so a shared ride or a multi-stop detour has one document representing the whole itinerary rather than one row per leg.
+
+### 3.1 How demand actually enters the queue
+
+Two paths, and only two. The on-demand path is the visible one: a guest raises a `RideRequest`, a human approves it, and `GreedyMatcher` runs. But most of this event's demand is *already known* — 40 guests with flights and trains in the system before anyone opens the app — and nothing about an admin approving a walk-up request would ever surface it.
+
+`arrivalSweep.job.ts` (`ARRIVAL_SWEEP_CRON`, every minute) is the bridge. It finds `REGISTERED` guests whose scheduled arrival falls inside `ARRIVAL_LOOKAHEAD_MIN` (default 45), and turns each into a `QueueEntry` with `earliestAt` clamped to the landing time and a `deadlineAt` 45 minutes after it. Three details make it safe to run on a cron rather than once:
+
+1. **The lower bound of the window is open-ended.** It matches everything arriving *before* `now + lookahead`, not a band around it. A sweep that didn't run — a restart, a deploy, a paused free-tier instance — otherwise strands every guest whose window elapsed while it was down.
+2. **It is idempotent and re-entrant.** A guest already holding an open (`waiting`/`matching`) queue entry or a `currentTripId` is skipped, so overlapping runs or a crash mid-sweep cannot double-book anyone. This is a `find`-then-skip rather than a unique index because the skip condition spans two collections.
+3. **The trip type comes from the event phase, not from the guest.** `EventPhaseService.defaultTripType()` matches `now` against `EventConfig.phases` — a **half-open** `[startAt, endAt)` window, so back-to-back phases (the seed defines exactly one such boundary, 18:00 on day 2) never both match. Outside every configured phase it falls back to `ARRIVAL_PICKUP` rather than throwing: a dispatch tick must never fail because the clock drifted past the last configured phase. That's G4, and it is a pure module with no DB dependency precisely so it can be unit-tested against a fixed clock (`tests/unit/eventPhase.test.ts`).
 
 ## 4. The matching algorithm
 
@@ -128,6 +138,9 @@ Enforced server-side, independently of the frontend: every driver-role handler r
 | Mongo blip | Mongoose auto-reconnects with write buffering; the tick lock has a TTL, so it can't deadlock permanently even if a process dies mid-tick. |
 | Socket disconnect | Client reconnects with backoff and resyncs full state over REST — sockets are only ever a delta on top of a REST-fetched baseline, never the source of truth. |
 | Everything automated breaks | `POST /api/admin/trips/manual` and `/api/admin/trips/:id/reassign` touch `TripService` only — no scoring code in the import graph — so a manual override always works even if the engine is on fire. |
+| Arrival sweep misses a run | Its query window is open-ended below (§3.1), so the next run picks up everything the missed one would have — no guest is stranded by a restart. |
+| Client loses the network | Both apps show an explicit offline banner rather than letting frozen figures read as a broken app. `navigator.onLine` drives the banner only — it reports a link, not a reachable API — so it never gates a request; the client's own `NETWORK_ERROR` stays the authority on whether a call failed. |
+| A session expires mid-use | A 401 on an authenticated call clears local auth and returns the user to the login screen **with a notice explaining why**. A 401 on the login call itself carries no token and is treated as a wrong password, so a bad sign-in never masquerades as an expiry. |
 
 ## 12. Trade-offs made
 
@@ -136,6 +149,7 @@ Enforced server-side, independently of the frontend: every driver-role handler r
 - **JWT in localStorage over httpOnly cookies**: avoids cross-site cookie complexity between two Vercel projects and a Render backend on different origins; accepts XSS exposure, mitigated by a short token expiry.
 - **Copied `shared/` directory over a compiled workspace package**: `scripts/sync-shared.mjs` copies `shared/src/**` into each app's `src/shared/` on `predev`/`prebuild`. Eliminates build-ordering failures on Render's free tier and in CI, at the cost of a sync step and a committed generated copy per app.
 - **Hungarian on a bounded matrix, greedy above 150×150**: optimal where it's affordable, a latency guarantee where it isn't.
+- **Semantic CSS-variable tokens over Tailwind `dark:` variants**: every neutral in both apps resolves through `--c-surface`/`--c-ink`/`--c-line`/… rather than a literal grey, so dark mode is one class on `<html>` instead of a `dark:` variant on each of several hundred elements — and a component copied between the two apps keeps working, because both define the same token contract. The cost is one indirection between reading a class name and knowing its colour, plus a block of `.dark .bg-red-50 { … }` overrides for the accent *tints*: Tailwind's `-50`/`-100` steps are near-white by design, which is right behind a badge on a white card and glaring on a dark one. Remapping ~20 tint utilities once beats hanging a variant on ~45 call sites. OpenStreetMap ships no dark raster tiles, so the dark basemap inverts the tile pane only, leaving markers and polylines their true colours.
 - **Single-process `node-cron` scheduler**: simple and adequate at this event's scale (one Render instance); would need a distributed lock (or a real queue like BullMQ) the moment there's more than one server process.
 - **Atlas `0.0.0.0/0` network access**: required because Render's free tier has no static outbound IPs to allow-list.
 - **Match-latency and idle-while-waiting metrics in the simulator are heuristic**, not instrumented at the source — see `docs/DEMO_SCRIPT.md`/README "Known limitations" for the specifics of how they're derived and their edge cases (e.g. a rejected-then-rematched guest's `QueueEntry.enqueuedAt` gets deliberately backdated as a priority boost, so simulation metrics track the guest's original arrival time in-memory rather than trusting that mutable field).

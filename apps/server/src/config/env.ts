@@ -30,6 +30,8 @@ const envSchema = z.object({
   DISPATCH_TICK_CRON: cronField.default('*/30 * * * * *'),
   REOPTIMIZE_CRON: cronField.default('0 */2 * * * *'),
   STARVATION_SWEEP_CRON: cronField.default('0 * * * * *'),
+  ARRIVAL_SWEEP_CRON: cronField.default('0 */1 * * * *'),
+  ARRIVAL_LOOKAHEAD_MIN: z.coerce.number().int().positive().default(45),
   BATCH_HORIZON_MIN: z.coerce.number().int().positive().default(45),
   MAX_DETOUR_MIN: z.coerce.number().int().positive().default(8),
   STARVATION_THRESHOLD_MIN: z.coerce.number().int().positive().default(20),

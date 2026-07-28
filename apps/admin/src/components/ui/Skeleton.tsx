@@ -1,5 +1,7 @@
+// A sweep rather than a pulse: a pulsing block reads as "something is here",
+// a travelling highlight reads as "something is on its way".
 export function Skeleton({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-gray-200 ${className}`} />;
+  return <div className={`er-shimmer rounded bg-line-soft ${className}`} />;
 }
 
 export function SkeletonRows({ rows = 4, className = '' }: { rows?: number; className?: string }) {
@@ -14,7 +16,7 @@ export function SkeletonRows({ rows = 4, className = '' }: { rows?: number; clas
 
 export function SkeletonCard() {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="er-elev-1 rounded-xl border border-line bg-surface p-4">
       <Skeleton className="mb-3 h-4 w-1/3" />
       <Skeleton className="h-8 w-1/2" />
     </div>

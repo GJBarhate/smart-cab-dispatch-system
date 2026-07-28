@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ChevronDown, ChevronUp, History, Star } from 'lucide-react';
@@ -11,7 +11,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { useTripHistory, guestKeys } from '../hooks/useGuestQueries';
 import { guestApi } from '../api/guest';
 import { ApiError } from '../api/client';
-import { TRIP_TYPE_LABEL, tripStatusTone } from '../utils/labels';
+import { TRIP_TYPE_LABEL, TRIP_STATUS_LABEL, tripStatusTone } from '../utils/labels';
 import type { TripView } from '../types/domain';
 
 export default function Trips(): JSX.Element {
@@ -19,8 +19,8 @@ export default function Trips(): JSX.Element {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
-    <div className="space-y-3 p-4 pb-6">
-      <h1 className="text-xl font-bold text-gray-900">My rides</h1>
+    <div className="er-stagger space-y-4 p-4 pb-6">
+      <h1 className="text-xl font-bold tracking-tight text-ink">My rides</h1>
 
       {isLoading && <ListSkeleton rows={3} />}
 
@@ -44,35 +44,35 @@ function TripRow({ trip, expanded, onToggle }: { trip: TripView; expanded: boole
 
   return (
     <Card className="!p-0">
-      <button onClick={onToggle} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+      <button onClick={onToggle} className="flex w-full items-center justify-between gap-3 p-4 text-left active:bg-elevated">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-gray-800">{TRIP_TYPE_LABEL[trip.type] ?? trip.type}</span>
-            <Badge tone={tripStatusTone(trip.status)}>{trip.status}</Badge>
+            <span className="text-sm font-semibold text-ink">{TRIP_TYPE_LABEL[trip.type] ?? trip.type}</span>
+            <Badge tone={tripStatusTone(trip.status)}>{TRIP_STATUS_LABEL[trip.status] ?? trip.status}</Badge>
           </div>
-          <p className="mt-1 truncate text-sm text-gray-500">
+          <p className="mt-1 truncate text-sm text-muted">
             {first?.label ?? 'Pickup'} → {last?.label ?? 'Drop'}
           </p>
-          <p className="mt-0.5 text-xs text-gray-400">{trip.createdAt ? format(new Date(trip.createdAt), 'd MMM, HH:mm') : ''}</p>
+          <p className="mt-0.5 text-xs text-faint">{trip.createdAt ? format(new Date(trip.createdAt), 'd MMM, HH:mm') : ''}</p>
         </div>
-        {expanded ? <ChevronUp className="h-5 w-5 flex-shrink-0 text-gray-400" /> : <ChevronDown className="h-5 w-5 flex-shrink-0 text-gray-400" />}
+        {expanded ? <ChevronUp className="h-5 w-5 flex-shrink-0 text-faint" /> : <ChevronDown className="h-5 w-5 flex-shrink-0 text-faint" />}
       </button>
 
       {expanded && (
-        <div className="border-t border-gray-100 p-4">
+        <div className="border-t border-line-soft p-4">
           <ol className="space-y-2">
             {trip.stops.map((stop) => (
               <li key={stop.seq} className="flex items-center gap-2 text-sm">
-                <span className={`h-2 w-2 rounded-full ${stop.status === 'done' ? 'bg-emerald-500' : 'bg-gray-300'}`} />
-                <span className="text-gray-500">{stop.kind === 'pickup' ? 'Pickup' : 'Drop'}</span>
-                <span className="font-medium text-gray-800">{stop.label}</span>
+                <span className={`h-2 w-2 rounded-full ${stop.status === 'done' ? 'bg-emerald-500' : 'bg-line'}`} />
+                <span className="text-muted">{stop.kind === 'pickup' ? 'Pickup' : 'Drop'}</span>
+                <span className="font-medium text-ink">{stop.label}</span>
               </li>
             ))}
           </ol>
 
           {trip.vehicleSnapshot?.number && (
-            <p className="mt-3 text-sm text-gray-500">
-              Vehicle: <span className="font-medium text-gray-800">{trip.vehicleSnapshot.number}</span>
+            <p className="mt-3 text-sm text-muted">
+              Vehicle: <span className="font-medium text-ink">{trip.vehicleSnapshot.number}</span>
             </p>
           )}
 
@@ -85,6 +85,9 @@ function TripRow({ trip, expanded, onToggle }: { trip: TripView; expanded: boole
 }
 
 function RateTrip({ tripId }: { tripId: string }): JSX.Element {
+  // One rating card renders per trip, so the ids have to be per-instance —
+  // a hard-coded id would make every textarea on the page share a label.
+  const commentId = useId();
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -110,24 +113,43 @@ function RateTrip({ tripId }: { tripId: string }): JSX.Element {
   if (done) return <p className="mt-3 text-sm text-emerald-600">Thanks for rating this ride!</p>;
 
   return (
-    <div className="mt-3 rounded-xl bg-gray-50 p-3">
-      <p className="mb-2 text-sm font-medium text-gray-700">Rate this ride</p>
-      <div className="flex gap-1">
+    <div className="mt-3 rounded-xl bg-elevated p-3">
+      {/* radiogroup, not a bare row of buttons: it tells a screen reader these
+          five controls are one choice, and `aria-checked` reports which. */}
+      <p className="mb-2 text-sm font-medium text-muted" id={`${commentId}-heading`}>
+        Rate this ride
+      </p>
+      <div className="flex gap-1" role="radiogroup" aria-labelledby={`${commentId}-heading`}>
         {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} type="button" onClick={() => setRating(n)} aria-label={`${n} star`}>
-            <Star className={`h-7 w-7 ${n <= rating ? 'fill-amber-400 text-amber-400' : 'text-gray-300'}`} />
+          <button
+            key={n}
+            type="button"
+            role="radio"
+            aria-checked={rating === n}
+            onClick={() => setRating(n)}
+            aria-label={`${n} star${n > 1 ? 's' : ''}`}
+            className="active:scale-90 transition-transform"
+          >
+            <Star className={`h-7 w-7 ${n <= rating ? 'fill-amber-400 text-amber-400' : 'text-faint'}`} />
           </button>
         ))}
       </div>
+      {/* A placeholder is not a label: it vanishes as soon as typing starts and
+          is not reliably announced. The visible label is hidden rather than
+          dropped so the field still has a name. */}
+      <label htmlFor={commentId} className="sr-only">
+        Add a comment about this ride (optional)
+      </label>
       <textarea
+        id={commentId}
         value={comment}
         onChange={(e) => setComment(e.target.value)}
         placeholder="Anything you'd like to add? (optional)"
-        className="mt-2 min-h-[64px] w-full rounded-lg border border-gray-200 bg-white p-2 text-sm"
+        className="mt-2 min-h-[64px] w-full rounded-xl border border-line bg-surface p-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
         maxLength={280}
       />
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-      <Button className="mt-2 min-h-[40px] px-4 py-1 text-sm" onClick={submit} disabled={rating < 1} loading={submitting}>
+      {error && <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>}
+      <Button className="mt-2 min-h-[36px] px-4 py-1 text-sm" onClick={submit} disabled={rating < 1} loading={submitting}>
         Submit rating
       </Button>
     </div>

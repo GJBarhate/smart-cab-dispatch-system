@@ -2,7 +2,8 @@ import { apiClient } from './client';
 import { withIds } from '../lib/normalize';
 import type {
   Driver, Guest, Trip, QueueEntry, RideRequest, Alert, LocationDoc, EventConfig,
-  DashboardData, AnalyticsData, DispatchHealth, DispatchPreview, DriverSummary
+  DashboardData, AnalyticsData, DispatchHealth, DispatchPreview, DriverSummary,
+  AuditEntry, AiAskResult, AiExplainResult, AiDigestResult
 } from '../types/models';
 
 // ---------- Auth ----------
@@ -81,7 +82,18 @@ export const AdminApi = {
   },
   ackAlert: (id: string) => apiClient.post<Alert>(`/admin/alerts/${id}/ack`),
 
-  analytics: () => apiClient.get<AnalyticsData>('/admin/analytics')
+  analytics: () => apiClient.get<AnalyticsData>('/admin/analytics'),
+
+  audit: (page = 1) => apiClient.get<AuditEntry[]>(`/admin/audit?page=${page}`)
+};
+
+// ---------- AI (admin-only, read-only, never in the dispatch path) ----------
+export const AiApi = {
+  ask: (question: string) => apiClient.post<AiAskResult>('/ai/ask', { question }),
+  // Works with GEMINI_API_KEY unset too — the server falls back to a
+  // deterministic template built from the recorded cost breakdown.
+  explain: (tripId: string) => apiClient.get<AiExplainResult>(`/ai/explain/${tripId}`),
+  digest: (hours = 4) => apiClient.get<AiDigestResult>(`/ai/digest?hours=${hours}`)
 };
 
 // ---------- Dispatch ----------

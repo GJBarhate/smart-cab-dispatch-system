@@ -4,6 +4,24 @@ import { useAuthStore } from '../store/authStore';
 
 const SocketContext = createContext<Socket | null>(null);
 
+/**
+ * Closes a socket without tearing down a handshake that is still in flight.
+ *
+ * StrictMode runs every effect twice in dev, so the first socket is cleaned up
+ * while its WebSocket is still CONNECTING — which the browser reports as
+ * "WebSocket is closed before the connection is established". Waiting for the
+ * handshake to settle removes the warning without weakening cleanup: the
+ * socket is still always closed, just one tick later.
+ */
+function closeSocket(s: Socket): void {
+  if (s.connected) {
+    s.disconnect();
+    return;
+  }
+  s.once('connect', () => s.disconnect());
+  s.once('connect_error', () => s.disconnect());
+}
+
 export function SocketProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const token = useAuthStore((s) => s.token);
   const logout = useAuthStore((s) => s.logout);
@@ -24,8 +42,12 @@ export function SocketProvider({ children }: { children: React.ReactNode }): JSX
     });
 
     s.on('connect_error', (err: Error) => {
-      // Server rejects the handshake if the token is missing/invalid.
+      // 'unauthorized' means the token is missing, invalid, or names a principal
+      // that no longer exists — the session is dead, so stop reconnecting and
+      // clear it. 'unavailable' is a server-side blip, so leave the socket to
+      // retry on its own backoff rather than signing the guest out.
       if (err.message === 'unauthorized') {
+        s.disconnect();
         logout();
       }
     });
@@ -34,7 +56,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }): JSX
 
     return () => {
       s.removeAllListeners();
-      s.disconnect();
+      closeSocket(s);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);

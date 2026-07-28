@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { Clock, Loader2, ShieldCheck } from 'lucide-react';
 import { AuthApi } from '../api/endpoints';
 import { useAuthStore } from '../store/authStore';
-import { ApiError } from '../api/client';
+import { ApiError, consumeSessionExpired } from '../api/client';
 import { Button } from '../components/ui/Button';
+import { PasswordInput } from '../components/ui/PasswordInput';
+import { ThemeToggle } from '../components/ui/ThemeToggle';
+import { Aurora, TiltCard } from '../components/ui/Aurora';
 
 const APP_NAME = (import.meta.env.VITE_APP_NAME as string) || 'EventRide Ops';
 
@@ -15,6 +18,9 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const setSession = useAuthStore((s) => s.setSession);
   const navigate = useNavigate();
+  // Read once on mount and clear, so the notice doesn't reappear on re-render
+  // or linger after a failed sign-in attempt.
+  const [sessionExpired] = useState(consumeSessionExpired);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,63 +41,81 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-ops-50 via-white to-gray-50 px-4">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-canvas px-4">
+      <Aurora />
+
+      <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-ops-600 text-white shadow-lg shadow-ops-200">
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-ops-600 text-white shadow-lg shadow-ops-600/40 ring-1 ring-white/25">
             <ShieldCheck size={24} />
           </div>
-          <h1 className="text-xl font-bold text-gray-900">{APP_NAME}</h1>
-          <p className="mt-1 text-sm text-gray-500">Admin &amp; driver sign in</p>
+          <h1 className="text-xl font-bold text-ink">{APP_NAME}</h1>
+          <p className="mt-1 text-sm text-muted">Admin &amp; driver sign in</p>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="identifier">
-              Email or phone
-            </label>
-            <input
-              id="identifier"
-              type="text"
-              autoComplete="username"
-              required
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              placeholder="admin@sahyadri.events or driver phone"
-              className="w-full rounded-md border border-gray-300 px-3 py-2.5 text-sm focus:border-ops-500 focus:outline-none focus:ring-1 focus:ring-ops-500"
-            />
+        {sessionExpired && (
+          <div
+            className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800"
+            role="status"
+          >
+            <Clock size={14} className="mt-px shrink-0" />
+            <span>Your session expired for security. Sign in again to pick up where you left off.</span>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full rounded-md border border-gray-300 px-3 py-2.5 text-sm focus:border-ops-500 focus:outline-none focus:ring-1 focus:ring-ops-500"
-            />
-          </div>
+        )}
 
-          {error && (
-            <p className="rounded-md bg-red-50 px-3 py-2 text-xs font-medium text-red-700" role="alert">
-              {error}
-            </p>
-          )}
+        <TiltCard className="rounded-2xl">
+          <form onSubmit={onSubmit} className="er-glass space-y-4 rounded-2xl p-6">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted" htmlFor="identifier">
+                Email or phone
+              </label>
+              <input
+                id="identifier"
+                type="text"
+                autoComplete="username"
+                required
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="admin@sahyadri.events or driver phone"
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted" htmlFor="password">
+                Password
+              </label>
+              <PasswordInput
+                id="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+            </div>
 
-          <Button type="submit" size="lg" className="w-full" loading={loading}>
-            {loading ? <Loader2 size={16} className="animate-spin" /> : null}
-            Sign in
-          </Button>
-        </form>
+            {error && (
+              <p className="rounded-md bg-red-50 px-3 py-2 text-xs font-medium text-red-700" role="alert">
+                {error}
+              </p>
+            )}
 
-        <p className="mt-4 text-center text-[11px] text-gray-400">
+            <Button type="submit" size="lg" className="w-full" loading={loading}>
+              {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+              Sign in
+            </Button>
+          </form>
+        </TiltCard>
+
+        <p className="mt-4 text-center text-[11px] text-faint">
           Demo — admin: admin@sahyadri.events / Admin@1234 · drivers: seeded phone / Driver@1234
         </p>
+
+        {/* The toggle also lives in the shell, but a user who prefers dark
+            shouldn't have to sign in through a bright screen first. */}
+        <div className="mt-5 flex justify-center">
+          <ThemeToggle />
+        </div>
       </div>
     </div>
   );

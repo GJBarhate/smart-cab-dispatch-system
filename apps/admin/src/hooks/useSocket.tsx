@@ -11,6 +11,24 @@ interface SocketContextValue {
 
 const SocketContext = createContext<SocketContextValue>({ socket: null, connected: false });
 
+/**
+ * Closes a socket without tearing down a handshake that is still in flight.
+ *
+ * StrictMode runs every effect twice in dev, so the first socket is cleaned up
+ * while its WebSocket is still CONNECTING — which the browser reports as
+ * "WebSocket is closed before the connection is established". Waiting for the
+ * handshake to settle removes the warning without weakening cleanup: the
+ * socket is still always closed, just one tick later.
+ */
+function closeSocket(s: Socket): void {
+  if (s.connected) {
+    s.disconnect();
+    return;
+  }
+  s.once('connect', () => s.disconnect());
+  s.once('connect_error', () => s.disconnect());
+}
+
 export function SocketProvider({ children }: { children: ReactNode }) {
   const token = useAuthStore((s) => s.token);
   const [connected, setConnected] = useState(false);
@@ -37,8 +55,23 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     const onConnect = () => setConnected(true);
     const onDisconnect = () => setConnected(false);
+    // 'unauthorized' means the token is missing, invalid, or names a principal
+    // that no longer exists (the usual cause is a re-seed). Without this the
+    // socket retries a dead session forever and the UI just looks offline.
+    // 'unavailable' is a server-side blip, so leave it to the normal backoff.
+    const onConnectError = (err: Error) => {
+      setConnected(false);
+      if (err.message === 'unauthorized') {
+        s.disconnect();
+        // Read through getState() rather than subscribing: making `clear` an
+        // effect dependency would tear down and rebuild the socket whenever the
+        // store's identity changed.
+        useAuthStore.getState().clear();
+      }
+    };
     s.on('connect', onConnect);
     s.on('disconnect', onDisconnect);
+    s.on('connect_error', onConnectError);
 
     socketRef.current = s;
     setSocket(s);
@@ -46,7 +79,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     return () => {
       s.off('connect', onConnect);
       s.off('disconnect', onDisconnect);
-      s.disconnect();
+      s.off('connect_error', onConnectError);
+      closeSocket(s);
       socketRef.current = null;
     };
   }, [token]);

@@ -10,8 +10,23 @@ import { DistanceCacheService } from '../services/routing/DistanceCacheService';
 import { toLatLng, toGeoPoint } from '../utils/geo';
 import type { LatLng } from '../utils/geo';
 import { LocationType, VehicleType, PriorityTier } from '../shared';
+import { seedDemoState } from './demoState';
 
 const FRESH = process.argv.includes('--fresh');
+// Demo state (trip history, live trips, pending approvals, queue backlog) is
+// on by default — without it every ops screen renders its empty state, which
+// is correct behaviour but impossible to demo or grade. `--no-demo` gives a
+// clean slate for anyone who wants to drive the system purely by hand.
+const WITH_DEMO = !process.argv.includes('--no-demo');
+
+// The event is anchored to the day the seed runs rather than to plan.md's
+// fixed 10-14 Aug window. A grader seeding on any other date would otherwise
+// land outside every phase, with no arrival due and nothing for the engine to
+// do. Place, coordinates and duration are unchanged; only the origin moves.
+const DAY1 = new Date();
+DAY1.setHours(0, 0, 0, 0);
+const day = (n: number, hours = 0, minutes = 0): Date =>
+  new Date(DAY1.getTime() + n * 24 * 60 * 60_000 + hours * 60 * 60_000 + minutes * 60_000);
 
 const LOCATIONS = [
   { name: 'Pune International Airport (T1)', type: LocationType.AIRPORT, lng: 73.9089, lat: 18.5793 },
@@ -146,7 +161,7 @@ async function seedDrivers(): Promise<Array<{ phone: string; password: string; n
         locationUpdatedAt: new Date(),
         predictedFreeAt: new Date(),
         predictedFreeLocation: toGeoPoint({ lat: spot.lat, lng: spot.lng }),
-        shift: { startAt: new Date('2026-08-10T00:30:00Z'), endAt: new Date('2026-08-10T16:30:00Z') },
+        shift: { startAt: day(0, 6), endAt: day(0, 22) },
         isActive: true
       });
       await User.updateOne({ _id: user._id }, { $set: { driverId: driver._id } });
@@ -174,10 +189,17 @@ async function seedGuests(locByName: Record<string, InstanceType<typeof Location
     const fromAirport = i % 2 === 0;
     const pickup = fromAirport ? airport : station;
 
-    const isPeak = i < 18; // 18 arrivals in the 09:00-10:30 peak window
-    const scheduledAt = isPeak
-      ? new Date(new Date('2026-08-10T09:00:00+05:30').getTime() + Math.floor((i / 18) * 90) * 60_000)
-      : new Date(new Date('2026-08-10T12:00:00+05:30').getTime() + i * 20 * 60_000);
+    // Arrivals are anchored to `now` so the arrival sweep has real work the
+    // moment the server starts: the first six have already landed, the next
+    // ten land across the following 90 minutes (the peak), and the rest are
+    // spread through the afternoon.
+    const nowMs = Date.now();
+    const scheduledAt =
+      i < 6
+        ? new Date(nowMs - (40 - i * 7) * 60_000)
+        : i < 16
+          ? new Date(nowMs + (i - 5) * 9 * 60_000)
+          : new Date(nowMs + 2 * 60 * 60_000 + (i - 16) * 20 * 60_000);
 
     const groupSize = i === 13 ? 14 : [1, 1, 2, 2, 3, 4][i % 6];
     const isVip = i < 3;
@@ -194,7 +216,7 @@ async function seedGuests(locByName: Record<string, InstanceType<typeof Location
         priorityTier: isVip ? PriorityTier.VIP : PriorityTier.STANDARD,
         isVip,
         arrival: { mode: fromAirport ? 'flight' : 'train', identifier: fromAirport ? `AI-${202 + i}` : `12${627 + i}`, scheduledAt, pickupLocationId: pickup._id, terminal: fromAirport ? 'T1' : '' },
-        departure: { mode: fromAirport ? 'flight' : 'train', scheduledAt: new Date('2026-08-13T14:00:00+05:30'), dropLocationId: pickup._id },
+        departure: { mode: fromAirport ? 'flight' : 'train', scheduledAt: day(3, 14), dropLocationId: pickup._id },
         accommodationId: hotel._id,
         status: 'registered',
         specialNeeds
@@ -220,16 +242,16 @@ async function seedEventConfig(locByName: Record<string, InstanceType<typeof Loc
         singleton: 'singleton',
         name: 'Sahyadri Tech Summit 2026',
         timezone: 'Asia/Kolkata',
-        startAt: new Date('2026-08-10T00:00:00+05:30'),
-        endAt: new Date('2026-08-14T23:59:00+05:30'),
+        startAt: day(0),
+        endAt: day(4, 23, 59),
         venueId: venue._id,
         airportId: airport._id,
         stationId: station._id,
         accommodationIds: accommodations.map((a) => a._id),
         phases: [
-          { key: 'ARRIVAL', startAt: new Date('2026-08-10T00:00:00+05:30'), endAt: new Date('2026-08-11T18:00:00+05:30'), defaultTripType: 'ARRIVAL_PICKUP' },
-          { key: 'EVENT_DAY', startAt: new Date('2026-08-11T18:00:00+05:30'), endAt: new Date('2026-08-13T12:00:00+05:30'), defaultTripType: 'TO_VENUE' },
-          { key: 'DEPARTURE', startAt: new Date('2026-08-13T12:00:00+05:30'), endAt: new Date('2026-08-14T23:59:00+05:30'), defaultTripType: 'DEPARTURE_DROP' }
+          { key: 'ARRIVAL', startAt: day(0), endAt: day(1, 18), defaultTripType: 'ARRIVAL_PICKUP' },
+          { key: 'EVENT_DAY', startAt: day(1, 18), endAt: day(3, 12), defaultTripType: 'TO_VENUE' },
+          { key: 'DEPARTURE', startAt: day(3, 12), endAt: day(4, 23, 59), defaultTripType: 'DEPARTURE_DROP' }
         ]
       }
     },
@@ -249,6 +271,20 @@ async function run(): Promise<void> {
   const drivers = await seedDrivers();
   const guests = await seedGuests(locByName);
 
+  // Layering a second demo snapshot over an existing one would double-book
+  // drivers and skew the analytics, so on a non-fresh run it is skipped when
+  // trips already exist. `--fresh` always rebuilds: the collections were just
+  // dropped, and a running dev server can slip its own trips in between the
+  // drop and this check.
+  let demo: Awaited<ReturnType<typeof seedDemoState>> | null = null;
+  if (WITH_DEMO) {
+    if (!FRESH && (await Trip.countDocuments({})) > 0) {
+      logger.info('trips already present — skipping demo state (re-run with --fresh to rebuild it)');
+    } else {
+      demo = await seedDemoState();
+    }
+  }
+
   // eslint-disable-next-line no-console
   console.log('\n=== SEED COMPLETE — DEMO CREDENTIALS ===\n');
   // eslint-disable-next-line no-console
@@ -264,7 +300,16 @@ async function run(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(`  ...and ${guests.length - 3} more`);
   // eslint-disable-next-line no-console
-  console.log(`\nLocations: ${LOCATIONS.length}  Drivers: ${drivers.length}  Guests: ${guests.length}\n`);
+  console.log(`\nLocations: ${LOCATIONS.length}  Drivers: ${drivers.length}  Guests: ${guests.length}`);
+  if (demo) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `Demo state : ${demo.completedTrips} completed trips · ${demo.liveTrips} live trips · ` +
+        `${demo.pendingRequests} awaiting approval · ${demo.queueEntries} queued · ${demo.alerts} alerts`
+    );
+  }
+  // eslint-disable-next-line no-console
+  console.log('');
 
   await disconnectDb();
   process.exit(0);

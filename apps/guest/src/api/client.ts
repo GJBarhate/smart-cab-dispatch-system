@@ -23,6 +23,30 @@ export function registerUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn;
 }
 
+// A 401 carrying a token means the session expired mid-use, not a bad login.
+// Recording it lets /login explain why the guest was bounced there. Stored in
+// sessionStorage so it survives the hard-redirect fallback above.
+const SESSION_EXPIRED_KEY = 'eventride-guest-session-expired';
+
+function markSessionExpired(): void {
+  try {
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, '1');
+  } catch {
+    // Blocked storage — the guest just gets the plain sign-in form.
+  }
+}
+
+/** Reads and clears the flag, so the notice shows exactly once. */
+export function consumeSessionExpired(): boolean {
+  try {
+    const expired = sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1';
+    if (expired) sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+    return expired;
+  } catch {
+    return false;
+  }
+}
+
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
@@ -50,6 +74,9 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   }
 
   if (res.status === 401) {
+    // Only a 401 on an authenticated call is an expiry; the login call carries
+    // no token and a 401 there just means the details were wrong.
+    if (token) markSessionExpired();
     useAuthStore.getState().logout();
     if (onUnauthorized) onUnauthorized();
     else window.location.assign('/login');

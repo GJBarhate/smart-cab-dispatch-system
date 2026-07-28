@@ -7,7 +7,7 @@ import { QueueEntry } from '../models/QueueEntry';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validate } from '../middleware/validate';
 import { requireAuth, requireRole } from '../middleware/auth';
-import { NotFoundError, ConflictError, ForbiddenError } from '../utils/errors';
+import { NotFoundError, ConflictError, ForbiddenError, StaleSessionError } from '../utils/errors';
 import { toGeoPoint } from '../utils/geo';
 import { TripService } from '../services/dispatch/TripService';
 import { NotificationService } from '../services/NotificationService';
@@ -27,7 +27,7 @@ driverRouter.get(
   '/me',
   asyncHandler(async (req, res) => {
     const driver = await Driver.findById(driverId(req));
-    if (!driver) throw new NotFoundError('Driver');
+    if (!driver) throw new StaleSessionError('Driver');
     res.json({ ok: true, data: driver });
   })
 );
@@ -47,7 +47,7 @@ driverRouter.patch(
       await Driver.updateOne({ _id: did }, { $set: { status: 'offline' } });
     } else {
       const driver = await Driver.findById(did);
-      if (!driver) throw new NotFoundError('Driver');
+      if (!driver) throw new StaleSessionError('Driver');
       if (driver.currentTripId) throw new ConflictError('Cannot break while on a trip');
 
       const until = new Date(Date.now() + (driver.break?.tripsSinceBreak ? 20 : 20) * 60_000);
@@ -284,7 +284,7 @@ driverRouter.get(
   '/summary',
   asyncHandler(async (req, res) => {
     const driver = await Driver.findById(driverId(req));
-    if (!driver) throw new NotFoundError('Driver');
+    if (!driver) throw new StaleSessionError('Driver');
 
     const tripsToday = await Trip.countDocuments({
       driverId: driver._id,

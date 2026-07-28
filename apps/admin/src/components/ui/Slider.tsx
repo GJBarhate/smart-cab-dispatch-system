@@ -12,7 +12,7 @@ interface Props {
 export function Slider({ label, value, min, max, step = 0.1, onChange, format, disabled }: Props) {
   return (
     <label className="block">
-      <div className="mb-1 flex items-center justify-between text-xs font-medium text-gray-600">
+      <div className="mb-1 flex items-center justify-between text-xs font-medium text-muted">
         <span>{label}</span>
         <span className="tabular-nums text-ops-700">{format ? format(value) : value}</span>
       </div>
@@ -24,7 +24,7 @@ export function Slider({ label, value, min, max, step = 0.1, onChange, format, d
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-gray-200 accent-ops-600 disabled:cursor-not-allowed"
+        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-line accent-ops-600 disabled:cursor-not-allowed"
       />
     </label>
   );

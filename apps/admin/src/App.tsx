@@ -1,18 +1,25 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+// Login stays eager: it is the one route an unauthenticated visitor always
+// lands on, so deferring it would only add a spinner before the first paint.
 import Login from './pages/Login';
-import OpsDashboard from './pages/OpsDashboard';
-import LiveOpsMapPage from './pages/LiveOpsMapPage';
-import DriverManagement from './pages/DriverManagement';
-import GuestManagement from './pages/GuestManagement';
-import ApprovalInbox from './pages/ApprovalInbox';
-import TripBoard from './pages/TripBoard';
-import QueueMonitor from './pages/QueueMonitor';
-import DispatchConsole from './pages/DispatchConsole';
-import Analytics from './pages/Analytics';
-import SettingsPage from './pages/SettingsPage';
-import DriverHome from './pages/driver/DriverHome';
+
+// Every authenticated route is split out. Statically importing them put all of
+// recharts (370 kB) and leaflet into the initial module graph, so signing in
+// downloaded the Analytics charts and the map even if you never opened either
+// — and a driver downloaded the entire admin console to reach one screen.
+const OpsDashboard = lazy(() => import('./pages/OpsDashboard'));
+const LiveOpsMapPage = lazy(() => import('./pages/LiveOpsMapPage'));
+const DriverManagement = lazy(() => import('./pages/DriverManagement'));
+const GuestManagement = lazy(() => import('./pages/GuestManagement'));
+const ApprovalInbox = lazy(() => import('./pages/ApprovalInbox'));
+const TripBoard = lazy(() => import('./pages/TripBoard'));
+const QueueMonitor = lazy(() => import('./pages/QueueMonitor'));
+const DispatchConsole = lazy(() => import('./pages/DispatchConsole'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const DriverHome = lazy(() => import('./pages/driver/DriverHome'));
 import { RequireAuth } from './components/RequireAuth';
 import { RequireRole } from './components/RequireRole';
 import { AdminShell } from './components/layout/AdminShell';
@@ -70,12 +77,25 @@ function WarmupSplash({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-ops-50 text-center">
         <Loader2 className="animate-spin text-ops-600" size={28} />
-        <p className="text-sm font-medium text-gray-700">Waking up the server…</p>
-        <p className="max-w-xs text-xs text-gray-500">Free-tier hosting sleeps after idling — this can take up to a minute the first time.</p>
+        <p className="text-sm font-medium text-muted">Waking up the server…</p>
+        <p className="max-w-xs text-xs text-muted">Free-tier hosting sleeps after idling — this can take up to a minute the first time.</p>
       </div>
     );
   }
   return <>{children}</>;
+}
+
+/**
+ * Shown while a route chunk is in flight. Deliberately quiet — on a warm cache
+ * the chunk resolves in a frame or two, and a full-page spinner flashing on
+ * every navigation would read as the app being slower, not faster.
+ */
+function RouteFallback() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-label="Loading page">
+      <Loader2 className="animate-spin text-ops-500" size={22} />
+    </div>
+  );
 }
 
 export default function App() {
@@ -84,32 +104,37 @@ export default function App() {
       <SessionWatcher />
       <WarmupSplash>
         <ErrorBoundary>
-          <Routes>
-            <Route path="/login" element={<Login />} />
+          {/* One boundary around the whole route table: each lazy route
+              suspends independently, and the shell (sidebar/header) is not
+              lazy, so only the page area shows the fallback. */}
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/login" element={<Login />} />
 
-            <Route element={<RequireAuth />}>
-              <Route element={<RequireRole role="admin" />}>
-                <Route element={<AdminShell />}>
-                  <Route index element={<OpsDashboard />} />
-                  <Route path="map" element={<LiveOpsMapPage />} />
-                  <Route path="drivers" element={<DriverManagement />} />
-                  <Route path="guests" element={<GuestManagement />} />
-                  <Route path="requests" element={<ApprovalInbox />} />
-                  <Route path="trips" element={<TripBoard />} />
-                  <Route path="queue" element={<QueueMonitor />} />
-                  <Route path="dispatch" element={<DispatchConsole />} />
-                  <Route path="analytics" element={<Analytics />} />
-                  <Route path="settings" element={<SettingsPage />} />
+              <Route element={<RequireAuth />}>
+                <Route element={<RequireRole role="admin" />}>
+                  <Route element={<AdminShell />}>
+                    <Route index element={<OpsDashboard />} />
+                    <Route path="map" element={<LiveOpsMapPage />} />
+                    <Route path="drivers" element={<DriverManagement />} />
+                    <Route path="guests" element={<GuestManagement />} />
+                    <Route path="requests" element={<ApprovalInbox />} />
+                    <Route path="trips" element={<TripBoard />} />
+                    <Route path="queue" element={<QueueMonitor />} />
+                    <Route path="dispatch" element={<DispatchConsole />} />
+                    <Route path="analytics" element={<Analytics />} />
+                    <Route path="settings" element={<SettingsPage />} />
+                  </Route>
+                </Route>
+
+                <Route element={<RequireRole role="driver" />}>
+                  <Route path="driver" element={<DriverHome />} />
                 </Route>
               </Route>
 
-              <Route element={<RequireRole role="driver" />}>
-                <Route path="driver" element={<DriverHome />} />
-              </Route>
-            </Route>
-
-            <Route path="*" element={<NotFoundRedirect />} />
-          </Routes>
+              <Route path="*" element={<NotFoundRedirect />} />
+            </Routes>
+          </Suspense>
         </ErrorBoundary>
       </WarmupSplash>
       <p className="sr-only">{APP_NAME}</p>

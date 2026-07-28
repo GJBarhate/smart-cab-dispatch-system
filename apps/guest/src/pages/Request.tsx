@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Minus, Plus, Send } from 'lucide-react';
+import { MapPin, Minus, Plus, Send } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { ListSkeleton } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { EmptyState } from '../components/ui/EmptyState';
 import { RequestStepper } from '../components/RequestStepper';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useGuestLocations, useGuestMe, usePendingRequest, useTripCurrent, guestKeys } from '../hooks/useGuestQueries';
 import { useActiveRequestStore } from '../store/activeRequestStore';
 import { useSocketEvent } from '../hooks/useSocket';
@@ -33,23 +35,25 @@ function groupByType(locations: LocationLite[]): Array<[string, LocationLite[]]>
 
 function Stepper({ value, onChange, min, max, label }: { value: number; onChange: (v: number) => void; min: number; max: number; label: string }): JSX.Element {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3">
-      <span className="text-sm font-medium text-gray-700">{label}</span>
+    <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3">
+      <span className="text-sm font-medium text-muted">{label}</span>
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={() => onChange(Math.max(min, value - 1))}
           disabled={value <= min}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-600 shadow disabled:opacity-40"
+          aria-label={`Decrease ${label.toLowerCase()}`}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-surface text-muted shadow active:bg-elevated disabled:opacity-40"
         >
           <Minus className="h-4 w-4" />
         </button>
-        <span className="w-6 text-center text-lg font-bold text-gray-900">{value}</span>
+        <span className="w-6 text-center text-lg font-bold text-ink">{value}</span>
         <button
           type="button"
           onClick={() => onChange(Math.min(max, value + 1))}
           disabled={value >= max}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-600 shadow disabled:opacity-40"
+          aria-label={`Increase ${label.toLowerCase()}`}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-surface text-muted shadow active:bg-elevated disabled:opacity-40"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -85,6 +89,7 @@ export default function Request(): JSX.Element {
   useSocketEvent('trip:status', useCallback(() => queryClient.invalidateQueries({ queryKey: guestKeys.tripCurrent }), [queryClient]));
 
   const [cancelling, setCancelling] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
 
   async function handleCancel() {
     if (!activeRequestId) return;
@@ -97,6 +102,7 @@ export default function Request(): JSX.Element {
       // Leave the stepper visible; the guest can retry.
     } finally {
       setCancelling(false);
+      setCancelConfirmOpen(false);
     }
   }
 
@@ -118,8 +124,18 @@ export default function Request(): JSX.Element {
 
   if (activeRequestId && pendingQuery.data) {
     return (
-      <div className="p-4">
-        <RequestStepper request={pendingQuery.data} trip={tripResp?.trip} onCancel={handleCancel} cancelling={cancelling} />
+      <div className="p-4 pb-6">
+        <RequestStepper request={pendingQuery.data} trip={tripResp?.trip} onCancel={() => setCancelConfirmOpen(true)} cancelling={cancelling} />
+        <ConfirmDialog
+          open={cancelConfirmOpen}
+          title="Cancel this request?"
+          message="You'll lose your place and will need to submit a new request if you still need a ride."
+          confirmLabel="Cancel request"
+          danger
+          loading={cancelling}
+          onConfirm={handleCancel}
+          onCancel={() => setCancelConfirmOpen(false)}
+        />
       </div>
     );
   }
@@ -204,10 +220,18 @@ function RequestForm({
     );
   }
 
-  if (error || !locations || locations.length === 0) {
+  if (error) {
     return (
       <div className="p-4">
-        <ErrorState error={error ?? new Error('No locations available yet.')} onRetry={() => refetch()} />
+        <ErrorState error={error} onRetry={() => refetch()} />
+      </div>
+    );
+  }
+
+  if (!locations || locations.length === 0) {
+    return (
+      <div className="p-4">
+        <EmptyState icon={MapPin} title="No locations available yet" subtitle="Check back shortly, or contact the event help desk." />
       </div>
     );
   }
@@ -215,17 +239,18 @@ function RequestForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4 p-4 pb-6">
       <div>
-        <h1 className="text-xl font-bold text-gray-900">Request a ride</h1>
-        <p className="mt-1 text-sm text-gray-500">Your driver is assigned automatically for the fastest pickup.</p>
+        <h1 className="text-xl font-bold text-ink">Request a ride</h1>
+        <p className="mt-1 text-sm text-muted">Your driver is assigned automatically for the fastest pickup.</p>
       </div>
 
       <Card className="space-y-3">
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">From</label>
+          <label htmlFor="pickup-location" className="mb-1 block text-sm font-medium text-muted">From</label>
           <select
+            id="pickup-location"
             value={fromId}
             onChange={(e) => setFromId(e.target.value)}
-            className="min-h-[48px] w-full rounded-xl border border-gray-300 bg-white px-3 text-base text-gray-900"
+            className="min-h-[48px] w-full rounded-xl border border-line bg-surface px-3 text-base text-ink focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
           >
             {grouped.map(([type, locs]) => (
               <optgroup key={type} label={LOCATION_TYPE_LABEL[type] ?? type}>
@@ -240,11 +265,12 @@ function RequestForm({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">To</label>
+          <label htmlFor="dropoff-location" className="mb-1 block text-sm font-medium text-muted">To</label>
           <select
+            id="dropoff-location"
             value={toId}
             onChange={(e) => setToId(e.target.value)}
-            className="min-h-[48px] w-full rounded-xl border border-gray-300 bg-white px-3 text-base text-gray-900"
+            className="min-h-[48px] w-full rounded-xl border border-line bg-surface px-3 text-base text-ink focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
           >
             <option value="" disabled>
               Select a destination
@@ -268,12 +294,13 @@ function RequestForm({
       </Card>
 
       <Card>
-        <label className="mb-1 block text-sm font-medium text-gray-700">Reason (optional)</label>
+        <label htmlFor="ride-reason" className="mb-1 block text-sm font-medium text-muted">Reason (optional)</label>
         <input
+          id="ride-reason"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="e.g. Heading to the keynote session"
-          className="min-h-[48px] w-full rounded-xl border border-gray-300 bg-white px-3 text-base text-gray-900"
+          className="min-h-[48px] w-full rounded-xl border border-line bg-surface px-3 text-base text-ink focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
           maxLength={140}
         />
       </Card>

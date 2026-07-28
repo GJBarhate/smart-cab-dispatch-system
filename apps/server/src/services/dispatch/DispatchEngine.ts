@@ -9,6 +9,7 @@ import { Driver } from '../../models/Driver';
 import { Guest } from '../../models/Guest';
 import { toGeoPoint, toLatLng, haversineKm } from '../../utils/geo';
 import { minutesBetween } from '../../utils/time';
+import { GuestStatus } from '../../shared';
 import { RoutingService } from '../routing/RoutingService';
 import { NotificationService } from '../NotificationService';
 import { AlertService } from '../AlertService';
@@ -20,7 +21,7 @@ import { CostFunction } from './CostFunction';
 import { BatchAssigner } from './BatchAssigner';
 import { Clusterer } from './Clusterer';
 import { GroupSplitter } from './GroupSplitter';
-import { DetourInserter } from './DetourInserter';
+import { DetourInserter, createEvaluationBudget } from './DetourInserter';
 import { GreedyMatcher } from './GreedyMatcher';
 import { TripService } from './TripService';
 import { BIG_M } from './types';
@@ -165,6 +166,61 @@ function raiseAlert(level: 'info' | 'warning' | 'critical', code: string, messag
   });
 }
 
+/**
+ * Retires demand that no driver could ever serve in time.
+ *
+ * `Feasibility.check()` rejects a pair when the earliest possible arrival
+ * exceeds `deadlineAt + grace`. Once `now` alone is past that point the check
+ * fails for *every* driver, no matter how close or idle — the entry is
+ * unmatchable by arithmetic, not by supply. Left alone it stays `waiting`
+ * forever: each tick re-reads it, spends a `DetourInserter` routing call per
+ * active trip on it, logs another `no_feasible_driver`, and leaves the queue
+ * monitor permanently red. Observed in practice at 25+ attempts per entry,
+ * which is also what exhausted the routing providers' rate limits.
+ *
+ * The cutoff deliberately uses zero pickup ETA — the most generous possible
+ * driver — so only provably impossible entries are retired here. Anything that
+ * a nearby driver could still make stays in the queue.
+ *
+ * Guests are returned to `REGISTERED` rather than left stranded: the arrival
+ * sweep then re-enqueues them with a fresh, achievable window (§3.1). That
+ * turns a permanent dead end into a ~45-minute retry cycle with an alert on
+ * each pass, which is visible to ops instead of silent.
+ */
+async function retireExpiredDemand(cfg: DispatchConfig, now: Date): Promise<number> {
+  const cutoff = new Date(now.getTime() - cfg.deadlineGraceMin * 60_000);
+
+  const doomed = await QueueEntry.find({ status: 'waiting', deadlineAt: { $lt: cutoff } })
+    .select('guestIds')
+    .lean();
+  if (doomed.length === 0) return 0;
+
+  const ids = doomed.map((e: any) => e._id);
+  const guestIds = doomed.flatMap((e: any) => e.guestIds ?? []);
+
+  await QueueEntry.updateMany(
+    { _id: { $in: ids } },
+    { $set: { status: 'failed', lastFailureReason: 'deadline_expired', lastAttemptAt: now } }
+  );
+
+  if (guestIds.length > 0) {
+    // Only guests with no trip in flight — a guest already riding must keep
+    // their status, and their stale entry is just bookkeeping.
+    await Guest.updateMany(
+      { _id: { $in: guestIds }, currentTripId: null },
+      { $set: { status: GuestStatus.REGISTERED }, $unset: { waitingSince: 1 } }
+    );
+  }
+
+  raiseAlert(
+    'warning',
+    'DEADLINE_EXPIRED',
+    `${doomed.length} demand(s) passed their deadline unmatched and were requeued for a fresh window`
+  );
+
+  return doomed.length;
+}
+
 async function buildGuestLineItems(guestIds: string[]): Promise<Array<{ guestId: string; name: string; seats: number; luggage: number }>> {
   const guests = await Guest.find({ _id: { $in: guestIds } }).select('name groupSize luggageCount').lean();
   return guests.map((g: any) => ({
@@ -275,6 +331,7 @@ export const DispatchEngine = {
     try {
       await DriverStateService.refreshPredictedFreeState();
       await expireStaleOffers(cfg.offerTimeoutSec, now);
+      await retireExpiredDemand(cfg, now);
 
       const horizonAt = new Date(now.getTime() + cfg.batchHorizonMin * 60_000);
       const entryDocs = await QueueEntry.find({
@@ -292,9 +349,13 @@ export const DispatchEngine = {
 
       // --- 1. Detour insertion first (cheapest — zero new deadhead) ---
       if (cfgDoc.featureFlags!.detourEnabled) {
+        // One allowance shared by every entry in this tick. Without it the
+        // per-call cap multiplies by queue depth, and a 12-entry queue can
+        // issue thousands of routing round trips in a single tick.
+        const detourBudget = createEvaluationBudget();
         for (const entry of entryDocs) {
           const demand = demandFromSingleEntry(entry, now);
-          const insertion = await DetourInserter.findBest(demand, cfg, now);
+          const insertion = await DetourInserter.findBest(demand, cfg, now, detourBudget);
           if (!insertion) {
             stillWaiting.push(entry);
             continue;
@@ -371,13 +432,12 @@ export const DispatchEngine = {
       const pairs = BatchAssigner.solve(cost);
       const resolvedEntryIds = new Set<string>();
 
-      // Each pair touches a distinct driver (Hungarian never reuses a row),
-      // so these commits are independent and safe to run concurrently —
-      // trip codes come from an atomic counter (Counter.nextSequence) and
-      // driver claims are an atomic findOneAndUpdate, so there's no race to
-      // guard against here, only the sequential-Atlas-round-trip cost to
-      // avoid (dozens of commits at 100-300ms each adds up to a very slow
-      // tick otherwise).
+      // Each pair touches a distinct driver (Hungarian never reuses a row), so
+      // these commits are independent and safe to run concurrently — trip codes
+      // come from an atomic counter (Counter.nextSequence) and driver claims are
+      // an atomic findOneAndUpdate. Running them concurrently avoids the
+      // sequential-Atlas-round-trip cost (dozens of commits at 100-300ms each
+      // adds up to a very slow tick otherwise).
       const feasiblePairs = pairs.filter(({ driverIndex, demandIndex }) => cost[driverIndex][demandIndex] < BIG_M);
       await mapWithConcurrency(feasiblePairs, GREEDY_SWEEP_CONCURRENCY, async ({ driverIndex, demandIndex }) => {
         const driver = eligible[driverIndex];
@@ -386,9 +446,29 @@ export const DispatchEngine = {
         const arrivalAt = new Date(now.getTime() + pickupEtaMin * 60_000);
         const { total, breakdown } = CostFunction.score(driver.plain, pending.demand, { now, pickupEtaMin, arrivalAt }, cfg);
 
-        await commitAssignment(driver.doc, pending.demand, pending, 'batch_hungarian', total, breakdown, pendingDemands.length);
-        matched++;
-        pending.sourceEntryIds.forEach((id) => resolvedEntryIds.add(id));
+        try {
+          await commitAssignment(driver.doc, pending.demand, pending, 'batch_hungarian', total, breakdown, pendingDemands.length);
+          matched++;
+          pending.sourceEntryIds.forEach((id) => resolvedEntryIds.add(id));
+        } catch (err) {
+          // Hungarian guarantees each row in *this batch* is a distinct driver,
+          // but not that the driver is still free at commit time. The
+          // starvation sweep, an admin approval, a detour insertion earlier in
+          // this same tick, or an overlapping tick can all claim one between
+          // scoring and commit; claimDriver is an atomic findOneAndUpdate, so
+          // the loser gets a 409.
+          //
+          // That conflict must fail this one pair, not the whole tick. Letting
+          // it propagate out of mapWithConcurrency rejects the Promise.all and
+          // aborts the entire dispatch round, discarding every other
+          // assignment in the batch — seen in the logs as a `scheduled job
+          // failed / Driver was assigned by another process` ERROR.
+          //
+          // Deliberately left out of resolvedEntryIds so the greedy sweep
+          // below retries it this same tick against a freshly queried driver
+          // list, rather than waiting for the next one.
+          void err;
+        }
       });
 
       // --- 8. Greedy sweep for anything still unmatched ---

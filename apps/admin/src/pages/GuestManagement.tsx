@@ -6,6 +6,7 @@ import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { SkeletonRows } from '../components/ui/Skeleton';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
@@ -30,6 +31,7 @@ export default function GuestManagement() {
   const [editTarget, setEditTarget] = useState<Guest | null>(null);
   const [arrivalDraft, setArrivalDraft] = useState('');
   const [modeDraft, setModeDraft] = useState<'flight' | 'train' | 'road'>('flight');
+  const [pendingImport, setPendingImport] = useState<File | null>(null);
 
   const guestsQ = useQuery({ queryKey: ['guests'], queryFn: () => AdminApi.guests(), refetchInterval: 20_000 });
 
@@ -64,6 +66,7 @@ export default function GuestManagement() {
         description: res.errors.length ? `${res.errors.length} row(s) failed` : undefined
       });
       qc.invalidateQueries({ queryKey: ['guests'] });
+      setPendingImport(null);
     },
     onError: (e: any) => push({ kind: 'error', title: 'Import failed', description: e.message })
   });
@@ -75,7 +78,7 @@ export default function GuestManagement() {
 
   function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) importMutation.mutate(file);
+    if (file) setPendingImport(file);
     e.target.value = '';
   }
 
@@ -89,8 +92,8 @@ export default function GuestManagement() {
     <div className="p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Guest Management</h1>
-          <p className="text-sm text-gray-500">Walk-ins, arrival corrections, and bulk CSV import.</p>
+          <h1 className="text-lg font-semibold text-ink">Guest Management</h1>
+          <p className="text-sm text-muted">Walk-ins, arrival corrections, and bulk CSV import.</p>
         </div>
         <div className="flex gap-2">
           <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={onFileChosen} />
@@ -110,8 +113,8 @@ export default function GuestManagement() {
           <div className="p-4"><EmptyState icon={Users} title="No guests yet" description="Add a walk-in or import a CSV to get started." /></div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-sm">
-              <thead className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+            <table className="er-table w-full min-w-[800px] text-sm">
+              <thead className="border-b border-line-soft bg-elevated text-left text-xs font-medium uppercase tracking-wide text-muted">
                 <tr>
                   <th className="px-4 py-2.5">Booking ref</th>
                   <th className="px-4 py-2.5">Name</th>
@@ -121,16 +124,16 @@ export default function GuestManagement() {
                   <th className="px-4 py-2.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-line-soft">
                 {guestsQ.data.map((g) => (
                   <tr key={g.id}>
                     <td className="px-4 py-2.5 font-mono text-xs">{g.bookingRef}</td>
                     <td className="px-4 py-2.5">
-                      <p className="font-medium text-gray-900">{g.name} {g.isVip && <Badge tone="purple" className="ml-1">VIP</Badge>}</p>
-                      <p className="text-xs text-gray-400">{g.phone}</p>
+                      <p className="font-medium text-ink">{g.name} {g.isVip && <Badge tone="purple" className="ml-1">VIP</Badge>}</p>
+                      <p className="text-xs text-faint">{g.phone}</p>
                     </td>
                     <td className="px-4 py-2.5 text-xs">{g.groupSize} pax · {g.luggageCount} bags</td>
-                    <td className="px-4 py-2.5 text-xs text-gray-500">
+                    <td className="px-4 py-2.5 text-xs text-muted">
                       {g.arrival?.scheduledAt ? fmtRelative(g.arrival.scheduledAt) : '—'}
                     </td>
                     <td className="px-4 py-2.5"><Badge tone={STATUS_TONE[g.status]}>{g.status.replace('_', ' ')}</Badge></td>
@@ -157,7 +160,7 @@ export default function GuestManagement() {
             <Field label="Group size"><input type="number" min={1} value={form.groupSize} onChange={(e) => setForm({ ...form, groupSize: Number(e.target.value) })} className="input" /></Field>
             <Field label="Luggage"><input type="number" min={0} value={form.luggageCount} onChange={(e) => setForm({ ...form, luggageCount: Number(e.target.value) })} className="input" /></Field>
           </div>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-muted">
             <input type="checkbox" checked={form.isVip} onChange={(e) => setForm({ ...form, isVip: e.target.checked })} />
             VIP priority tier
           </label>
@@ -199,13 +202,23 @@ export default function GuestManagement() {
           </p>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!pendingImport}
+        title="Import guests from CSV?"
+        message={pendingImport ? `"${pendingImport.name}" will be parsed and any valid rows added as new guests. This can't be undone in bulk.` : ''}
+        confirmLabel="Import"
+        loading={importMutation.isPending}
+        onConfirm={() => pendingImport && importMutation.mutate(pendingImport)}
+        onCancel={() => setPendingImport(null)}
+      />
     </div>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block text-xs font-medium text-gray-600">
+    <label className="block text-xs font-medium text-muted">
       {label}
       <div className="mt-1">{children}</div>
     </label>

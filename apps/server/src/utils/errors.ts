@@ -30,6 +30,22 @@ export class UnauthorizedError extends AppError {
   }
 }
 
+/**
+ * The token verified, but the principal it names is gone from the database —
+ * the usual cause is a re-seed (`npm run seed -- --fresh`) minting new ObjectIds
+ * while a browser still holds a token signed against the old ones.
+ *
+ * This is a dead *session*, not a missing *resource*, so it must be a 401: a 404
+ * leaves the client holding a token it will never be able to use, retrying
+ * forever. 401 is the one status every client already self-heals from by
+ * clearing the session and bouncing to the login screen.
+ */
+export class StaleSessionError extends AppError {
+  constructor(what: string) {
+    super(401, `Your session is no longer valid (${what} not found). Please sign in again.`, 'SESSION_STALE');
+  }
+}
+
 export class ValidationError extends AppError {
   constructor(details?: unknown) {
     super(422, 'Validation failed', 'VALIDATION', details);

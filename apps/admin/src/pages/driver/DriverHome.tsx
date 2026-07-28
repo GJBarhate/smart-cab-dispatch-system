@@ -8,7 +8,9 @@ import { useSocket, useSocketEvent } from '../../hooks/useSocket';
 import { useDriverGeolocation } from '../../hooks/useDriverGeolocation';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Toggle } from '../../components/ui/Toggle';
+import { ThemeToggle } from '../../components/ui/ThemeToggle';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { TripMap } from '../../components/map/TripMap';
@@ -35,6 +37,8 @@ export default function DriverHome() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState(REJECT_REASONS[0]);
   const [now, setNow] = useState(Date.now());
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const meQ = useQuery({ queryKey: ['driver', 'me'], queryFn: DriverApi.me, refetchInterval: 30_000 });
   const summaryQ = useQuery({ queryKey: ['driver', 'summary'], queryFn: DriverApi.summary, refetchInterval: 30_000 });
@@ -121,13 +125,14 @@ export default function DriverHome() {
   });
 
   async function handleLogout() {
+    setLoggingOut(true);
     try { await AuthApi.logout(); } catch { /* client discard proceeds regardless */ }
     clear();
   }
 
   if (meQ.isLoading) {
     return (
-      <div className="flex min-h-screen flex-col gap-4 bg-emerald-50 p-4">
+      <div className="flex min-h-screen flex-col gap-4 bg-canvas p-4">
         <Skeleton className="h-20 w-full" />
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -139,13 +144,13 @@ export default function DriverHome() {
   const driverPos = geo.position ?? (driver && !isZeroPoint(driver.currentLocation) ? toLeafletTuple(driver.currentLocation) : null);
 
   return (
-    <div className="min-h-screen bg-emerald-50/40">
+    <div className="min-h-screen bg-canvas">
       {/* Header — deliberately different accent from the admin (ops-purple) theme */}
-      <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-emerald-100 bg-white px-4 py-3 shadow-sm">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-emerald-100 bg-surface px-4 py-3 shadow-sm">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-gray-900">Hi {driver?.name?.split(' ')[0]} · {driver?.vehicle.number}</p>
-          <p className="flex items-center gap-1 text-xs text-gray-500">
-            <span className={`h-2 w-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-gray-300'}`} />
+          <p className="truncate text-sm font-semibold text-ink">Hi {driver?.name?.split(' ')[0]} · {driver?.vehicle.number}</p>
+          <p className="flex items-center gap-1 text-xs text-muted">
+            <span className={`h-2 w-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-line'}`} />
             {isOnline ? 'ONLINE' : 'OFFLINE'}
             {geo.permission === 'granted' && <span className="ml-1 flex items-center gap-0.5 text-emerald-600"><LocateFixed size={11} /> sharing location</span>}
             {geo.permission === 'denied' && <span className="ml-1 flex items-center gap-0.5 text-red-500"><WifiOff size={11} /> location blocked</span>}
@@ -158,7 +163,8 @@ export default function DriverHome() {
             onChange={(v) => statusMutation.mutate(v ? 'online' : 'offline')}
             accent="emerald"
           />
-          <button onClick={handleLogout} className="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600" aria-label="Log out">
+          <ThemeToggle compact />
+          <button onClick={() => setLogoutOpen(true)} className="rounded-md p-2 text-faint hover:bg-elevated hover:text-muted" aria-label="Log out">
             <LogOut size={18} />
           </button>
         </div>
@@ -168,10 +174,10 @@ export default function DriverHome() {
         {tripQ.isLoading ? (
           <Skeleton className="h-40 w-full" />
         ) : !trip ? (
-          <div className="rounded-2xl border border-dashed border-emerald-200 bg-white p-8 text-center">
+          <div className="rounded-2xl border border-dashed border-emerald-200 bg-surface p-8 text-center">
             <MapPin className="mx-auto mb-2 text-emerald-300" size={32} />
-            <p className="font-medium text-gray-700">{isOnline ? 'Waiting for your next trip' : "You're offline"}</p>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="font-medium text-muted">{isOnline ? 'Waiting for your next trip' : "You're offline"}</p>
+            <p className="mt-1 text-sm text-muted">
               {isOnline ? 'The dispatch engine will offer you a trip automatically — nothing to do here.' : 'Go online to start receiving trip offers.'}
             </p>
           </div>
@@ -201,24 +207,24 @@ export default function DriverHome() {
               </Button>
             )}
             {['completed', 'cancelled', 'rejected', 'unassignable'].includes(trip.status) && (
-              <div className="flex items-center gap-2 rounded-xl bg-white p-4 text-sm text-gray-600 shadow-sm">
+              <div className="flex items-center gap-2 rounded-xl bg-surface p-4 text-sm text-muted shadow-sm">
                 <CheckCircle2 size={18} className="text-emerald-500" /> Trip {trip.status} — waiting for your next assignment.
               </div>
             )}
           </>
         )}
 
-        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-          <p className="text-sm text-gray-600">
-            Trips today <span className="font-semibold text-gray-900">{summaryQ.data?.tripsToday ?? 0}</span>
+        <div className="rounded-xl border border-line-soft bg-surface p-4 shadow-sm">
+          <p className="text-sm text-muted">
+            Trips today <span className="font-semibold text-ink">{summaryQ.data?.tripsToday ?? 0}</span>
             {' · '}
             {summaryQ.data?.onBreakUntil
               ? <span className="font-semibold text-amber-600">On break</span>
-              : <span>Since last break: <span className="font-semibold text-gray-900">{summaryQ.data?.tripsSinceBreak ?? 0}</span> trips</span>}
+              : <span>Since last break: <span className="font-semibold text-ink">{summaryQ.data?.tripsSinceBreak ?? 0}</span> trips</span>}
           </p>
           {!trip && isOnline && !summaryQ.data?.onBreakUntil && (
             <Button variant="secondary" size="sm" className="mt-3 w-full" onClick={() => statusMutation.mutate('request_break')} loading={statusMutation.isPending}>
-              <Coffee size={14} /> Request break
+              <Coffee size={12} /> Request break
             </Button>
           )}
         </div>
@@ -239,13 +245,26 @@ export default function DriverHome() {
       >
         <div className="space-y-2">
           {REJECT_REASONS.map((r) => (
-            <label key={r} className="flex items-center gap-2 rounded-md border border-gray-100 p-3 text-sm">
+            <label key={r} className="flex items-center gap-2 rounded-md border border-line-soft p-3 text-sm">
               <input type="radio" name="reject-reason" checked={rejectReason === r} onChange={() => setRejectReason(r)} />
               {r}
             </label>
           ))}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={logoutOpen}
+        title="Log out?"
+        message={trip && !['completed', 'cancelled', 'rejected', 'unassignable'].includes(trip.status)
+          ? "You have an active trip in progress. Logging out won't cancel it, but you'll stop receiving updates until you sign back in."
+          : "You'll need to sign in again to receive trip offers."}
+        confirmLabel="Log out"
+        danger
+        loading={loggingOut}
+        onConfirm={handleLogout}
+        onCancel={() => setLogoutOpen(false)}
+      />
     </div>
   );
 }
@@ -258,12 +277,12 @@ function OfferCard({ trip, secondsLeft, onAccept, onReject, accepting }: { trip:
   const bagCount = trip.guests.reduce((s, g) => s + g.luggage, 0);
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-300 bg-white p-5 shadow-md">
+    <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-300 bg-surface p-5 shadow-md">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">New trip offer</p>
         <div className="relative flex h-11 w-11 items-center justify-center">
           <svg viewBox="0 0 40 40" className="h-11 w-11 -rotate-90">
-            <circle cx="20" cy="20" r="17" fill="none" stroke="#d1fae5" strokeWidth="4" />
+            <circle cx="20" cy="20" r="17" fill="none" stroke="rgba(5,150,105,0.25)" strokeWidth="4" />
             <circle
               cx="20" cy="20" r="17" fill="none" stroke="#059669" strokeWidth="4"
               strokeDasharray={2 * Math.PI * 17}
@@ -275,9 +294,9 @@ function OfferCard({ trip, secondsLeft, onAccept, onReject, accepting }: { trip:
         </div>
       </div>
       <dl className="space-y-1.5 text-sm">
-        <div className="flex justify-between"><dt className="text-gray-500">Pickup</dt><dd className="font-medium text-gray-900">{pickup?.label ?? '—'}</dd></div>
-        <div className="flex justify-between"><dt className="text-gray-500">Guests</dt><dd className="font-medium text-gray-900">{guestCount} ({bagCount} bags)</dd></div>
-        <div className="flex justify-between"><dt className="text-gray-500">Drop</dt><dd className="font-medium text-gray-900">{drop?.label ?? '—'}</dd></div>
+        <div className="flex justify-between"><dt className="text-muted">Pickup</dt><dd className="font-medium text-ink">{pickup?.label ?? '—'}</dd></div>
+        <div className="flex justify-between"><dt className="text-muted">Guests</dt><dd className="font-medium text-ink">{guestCount} ({bagCount} bags)</dd></div>
+        <div className="flex justify-between"><dt className="text-muted">Drop</dt><dd className="font-medium text-ink">{drop?.label ?? '—'}</dd></div>
       </dl>
       <div className="mt-4 flex gap-2">
         <Button size="lg" variant="success" className="flex-1 py-4 text-base" onClick={onAccept} loading={accepting}>ACCEPT</Button>
@@ -294,9 +313,9 @@ function TripStatusCard({ trip }: { trip: Trip }) {
   };
   const guestCount = trip.guests.length;
   return (
-    <div className="rounded-xl bg-white p-4 shadow-sm">
-      <p className="text-sm font-semibold text-gray-900">{labels[trip.status] ?? trip.status}</p>
-      <p className="text-xs text-gray-500">{guestCount} guest{guestCount !== 1 ? 's' : ''} · {trip.vehicleSnapshot?.number}</p>
+    <div className="rounded-xl bg-surface p-4 shadow-sm">
+      <p className="text-sm font-semibold text-ink">{labels[trip.status] ?? trip.status}</p>
+      <p className="text-xs text-muted">{guestCount} guest{guestCount !== 1 ? 's' : ''} · {trip.vehicleSnapshot?.number}</p>
     </div>
   );
 }

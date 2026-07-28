@@ -7,7 +7,7 @@ import { CardSkeleton } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useTripCurrent, useGuestMe, guestKeys } from '../hooks/useGuestQueries';
-import { useSocketEvent } from '../hooks/useSocket';
+import { useSocketConnected, useSocketEvent } from '../hooks/useSocket';
 import { useTripSubscription } from '../hooks/useTripSubscription';
 import { useDriverPosition } from '../hooks/useDriverPosition';
 import { useCountdownSeconds } from '../hooks/useCountdown';
@@ -31,6 +31,7 @@ export default function Track(): JSX.Element {
   const invalidate = useCallback(() => queryClient.invalidateQueries({ queryKey: guestKeys.tripCurrent }), [queryClient]);
   useSocketEvent('trip:status', invalidate);
   useSocketEvent('trip:eta', invalidate);
+  const connected = useSocketConnected();
 
   const trip = tripResp?.trip ?? null;
   useTripSubscription(trip?.id ?? null);
@@ -86,13 +87,16 @@ export default function Track(): JSX.Element {
       <button
         onClick={() => navigate(-1)}
         aria-label="Back"
-        className="absolute left-4 top-4 z-[1000] flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-lg"
+        className="absolute left-4 top-4 z-[1000] flex h-12 w-12 items-center justify-center rounded-full bg-surface shadow-lg ring-1 ring-line active:scale-95"
       >
-        <ChevronLeft className="h-6 w-6 text-gray-700" />
+        <ChevronLeft className="h-6 w-6 text-muted" />
       </button>
 
-      <div className="absolute left-1/2 top-4 z-[1000] -translate-x-1/2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-gray-800 shadow-lg">
-        {TRIP_STATUS_LABEL[trip.status] ?? trip.status} · ETA {formatEta(etaSeconds)}
+      <div className="er-elev-2 absolute left-1/2 top-4 z-[1000] flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface px-4 py-2 text-sm font-semibold text-ink">
+        {/* The ping is the guest's only cue that the ETA is still being updated
+            rather than frozen on the last value the app happened to receive. */}
+        <span className="er-live-dot" data-stale={!connected} title={connected ? 'Live' : 'Reconnecting…'} />
+        {TRIP_STATUS_LABEL[trip.status] ?? trip.status} · ETA <span className="er-nums">{formatEta(etaSeconds)}</span>
       </div>
     </div>
   );
