@@ -2,7 +2,10 @@
 
 Fully automated ride dispatch for a single private event: a fixed, pre-registered fleet serving hundreds of guests moving between an airport/railway station, several accommodations, and one venue across arrival, event, and departure phases. No guest or driver ever picks the other — matching is 100% automatic (see the automation boundary in [`DESIGN.md`](./DESIGN.md)).
 
-**Live URLs:** _add after deploying — backend on Render (root dir the repo root, build `npm ci && npm run sync && npm run build -w server`, start `node apps/server/dist/index.js`, health check `/api/health`), frontends as two Vercel projects rooted at `apps/guest` and `apps/admin`._
+**Live URLs:**
+- **Backend (Render):** [https://smart-cab-dispatch-system.onrender.com](https://smart-cab-dispatch-system.onrender.com) — health check `/api/health`
+- **Guest App (Vercel):** [https://smart-cab-dispatch-system-guest.vercel.app](https://smart-cab-dispatch-system-guest.vercel.app)
+- **Admin App (Vercel):** [https://smart-cab-dispatch-system-admin.vercel.app](https://smart-cab-dispatch-system-admin.vercel.app)
 **Demo video:** _add Loom link — script in [`docs/DEMO_SCRIPT.md`](./docs/DEMO_SCRIPT.md)._
 
 ### Demo credentials
