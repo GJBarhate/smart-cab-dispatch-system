@@ -7,7 +7,7 @@
     <title>EventRide</title>
     <script>
       // Applies the saved theme before first paint — see the admin app for the
-      // reasoning. Key must match THEME_STORAGE_KEY in src/store/themeStore.ts.
+      // reasoning. Key must match THEME_STORAGE_KEY in src/store/themeStore.js.
       (function () {
         try {
           var saved = localStorage.getItem('eventride-guest-theme');
@@ -21,6 +21,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

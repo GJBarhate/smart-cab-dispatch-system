@@ -9,7 +9,7 @@
     <script>
       // Applies the saved theme before first paint. Without this the app
       // renders one light frame and then snaps to dark on hydration.
-      // Key must match THEME_STORAGE_KEY in src/store/themeStore.ts.
+      // Key must match THEME_STORAGE_KEY in src/store/themeStore.js.
       (function () {
         try {
           var saved = localStorage.getItem('eventride-admin-theme');
@@ -23,6 +23,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

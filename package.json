@@ -19,15 +19,14 @@
     "seed:fresh": "npm run seed:fresh -w server",
     "simulate": "npm run simulate -w server",
     "test": "npm run sync && npm run test -w server && npm run test -w guest && npm run test -w admin",
-    "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "npm run sync && npm run typecheck -w server && npm run typecheck -w guest && npm run typecheck -w admin"
+    "lint": "eslint . --ext .js,.jsx"
   },
   "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@babel/plugin-transform-modules-commonjs": "7.29.7",
     "concurrently": "8.2.2",
-    "typescript": "5.5.4",
     "eslint": "8.57.0",
-    "@typescript-eslint/parser": "7.18.0",
-    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "4.6.2",
     "prettier": "3.3.3"
   }
