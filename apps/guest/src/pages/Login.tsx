@@ -103,19 +103,27 @@ export default function Login(): JSX.Element {
               Sign in
             </Button>
 
-            {import.meta.env.DEV && (
-              <button
-                type="button"
-                onClick={() => {
-                  setBookingRef('EVT-1001');
-                  setPhone('7000010000');
-                }}
-                className="mx-auto flex min-h-[36px] items-center gap-1.5 rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Use demo credentials
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={async () => {
+                setBookingRef('EVT-1001');
+                setPhone('7000010000');
+                setError(null);
+                setLoading(true);
+                try {
+                  const res = await authApi.guestLogin('EVT-1001', '7000010000');
+                  setAuth(res.token, res.name);
+                  navigate('/', { replace: true });
+                } catch (err) {
+                  setError(err instanceof ApiError ? err.message : 'Could not sign in. Please try again.');
+                  setLoading(false);
+                }
+              }}
+              className="mx-auto flex min-h-[36px] items-center gap-1.5 rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Use demo credentials
+            </button>
           </form>
         </TiltCard>
 

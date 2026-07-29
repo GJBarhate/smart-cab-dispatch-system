@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, Loader2, ShieldCheck } from 'lucide-react';
+import { Clock, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
 import { AuthApi } from '../api/endpoints';
 import { useAuthStore } from '../store/authStore';
 import { ApiError, consumeSessionExpired } from '../api/client';
@@ -104,6 +104,57 @@ export default function Login() {
               {loading ? <Loader2 size={16} className="animate-spin" /> : null}
               Sign in
             </Button>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  setIdentifier('admin@sahyadri.events');
+                  setPassword('Admin@1234');
+                  setError(null);
+                  setLoading(true);
+                  try {
+                    const res = await AuthApi.login('admin@sahyadri.events', 'Admin@1234');
+                    if (res.role !== 'admin' && res.role !== 'driver') {
+                      throw new ApiError(403, 'FORBIDDEN', 'This portal is for admin and driver accounts only.');
+                    }
+                    setSession(res);
+                    navigate(res.role === 'driver' ? '/driver' : '/', { replace: true });
+                  } catch (err) {
+                    setError(err instanceof ApiError ? err.message : 'Login failed. Please try again.');
+                    setLoading(false);
+                  }
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-ops-100 px-3 py-1.5 text-xs font-medium text-ops-700"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Demo Admin
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIdentifier('9876543000');
+                  setPassword('Driver@1234');
+                  setError(null);
+                  setLoading(true);
+                  try {
+                    const res = await AuthApi.login('9876543000', 'Driver@1234');
+                    if (res.role !== 'admin' && res.role !== 'driver') {
+                      throw new ApiError(403, 'FORBIDDEN', 'This portal is for admin and driver accounts only.');
+                    }
+                    setSession(res);
+                    navigate(res.role === 'driver' ? '/driver' : '/', { replace: true });
+                  } catch (err) {
+                    setError(err instanceof ApiError ? err.message : 'Login failed. Please try again.');
+                    setLoading(false);
+                  }
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-700"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Demo Driver
+              </button>
+            </div>
           </form>
         </TiltCard>
 
