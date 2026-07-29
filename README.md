@@ -67,7 +67,7 @@ flowchart LR
 
 | Layer | Tech |
 |---|---|
-| Backend | Node 20, Express 4, TypeScript, Mongoose 8, Socket.IO 4 |
+| Backend | Node 20, Express 4, JavaScript (ESM/CommonJS), Mongoose 8, Socket.IO 4 |
 | Matching | Hungarian algorithm (`munkres-js`), custom cost function, hard feasibility mask |
 | Database | MongoDB Atlas M0 (free) |
 | Routing | OSRM public demo → OpenRouteService → haversine fallback chain |
@@ -109,13 +109,13 @@ Run the test suite (unit + integration, `mongodb-memory-server`, no external dep
 npm test -w server
 ```
 
-Run the peak-arrival load test (boots the real server in-process and drives it over real HTTP — see `apps/server/src/sim/simulate.ts`). The defaults already match the scenario below, so no arguments are needed:
+Run the peak-arrival load test (boots the real server in-process and drives it over real HTTP — see `apps/server/src/sim/simulate.js`). The defaults already match the scenario below, so no arguments are needed:
 ```bash
 npm run simulate
 ```
 To run it at a different scale, invoke it directly (see the Windows note above):
 ```bash
-cd apps/server && npx tsx src/sim/simulate.ts --drivers 60 --guests 250 --burst 90 --minutes 20 --speed 30x
+cd apps/server && node src/sim/simulate.js --drivers 60 --guests 250 --burst 90 --minutes 20 --speed 30x
 ```
 **Either form wipes and re-seeds the Driver/Guest/Trip/QueueEntry/Alert collections** — run `npm run seed:fresh` afterward to restore the demo dataset before recording anything.
 
@@ -154,7 +154,7 @@ ASSERTIONS
 
 **This run earned its keep**: load-testing at this scale surfaced and fixed two real dispatch-engine bugs that unit tests alone never would have — (1) a driver-claim race where `status` and `currentTripId` were set in two separate writes, leaving a window where a second concurrent commit could claim the same driver twice (now one atomic `findOneAndUpdate`, verified fixed — the "double-assigned drivers" assertion above is a hard ✔), and (2) fully sequential per-commit and per-driver database writes that turned a single tick into a multi-minute stall under load (now bounded-concurrency, cutting tick duration by roughly 3-4x).
 
-**The two remaining ✘s are an honest, documented limitation, not a bug**: every driver/queue read and write here is a real network round trip to a MongoDB Atlas cluster (not a local dev database), and the simulator deliberately forces the zero-network haversine estimator (see the comment at the top of `sim/simulate.ts`) so it measures the dispatch engine, not the free OSRM/ORS demo servers' latency. Even so, at 60 drivers × 250 guests, a tick's Atlas round trips add up to more than the plan's 2-second match-latency target, and a burst of arrivals waits through more than one tick before every idle driver is claimed. Both are throughput/latency findings against a specific (free-tier, remote) database, not evidence of an incorrect match — capacity is always respected and no driver is ever double-booked. See `DESIGN.md` §13 for what would close this gap at 10× scale (a Redis-backed queue, bulk writes, a self-hosted DB).
+**The two remaining ✘s are an honest, documented limitation, not a bug**: every driver/queue read and write here is a real network round trip to a MongoDB Atlas cluster (not a local dev database), and the simulator deliberately forces the zero-network haversine estimator (see the comment at the top of `sim/simulate.js`) so it measures the dispatch engine, not the free OSRM/ORS demo servers' latency. Even so, at 60 drivers × 250 guests, a tick's Atlas round trips add up to more than the plan's 2-second match-latency target, and a burst of arrivals waits through more than one tick before every idle driver is claimed. Both are throughput/latency findings against a specific (free-tier, remote) database, not evidence of an incorrect match — capacity is always respected and no driver is ever double-booked. See `DESIGN.md` §13 for what would close this gap at 10× scale (a Redis-backed queue, bulk writes, a self-hosted DB).
 
 ---
 

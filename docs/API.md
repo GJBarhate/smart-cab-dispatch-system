@@ -132,4 +132,4 @@ Auth via `socket.handshake.auth.token` (same JWT). Rooms: `admin`, `driver:<id>`
 Client → Server: `driver:location`, `trip:subscribe`, `admin:subscribeMap`.
 Server → Client: `trip:offered`, `trip:assigned`, `trip:status`, `trip:eta`, `driver:position`, `request:status`, `queue:update`, `dispatch:tick`, `admin:alert`, `driver:break`.
 
-See `shared/src/events.ts` for exact payload shapes.
+See `shared/src/events.js` for exact payload shapes.

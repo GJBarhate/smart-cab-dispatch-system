@@ -39,15 +39,15 @@ Concretely: `POST /api/guest/requests` only ever creates a `pending_approval` `R
 
 Two paths, and only two. The on-demand path is the visible one: a guest raises a `RideRequest`, a human approves it, and `GreedyMatcher` runs. But most of this event's demand is *already known* — 40 guests with flights and trains in the system before anyone opens the app — and nothing about an admin approving a walk-up request would ever surface it.
 
-`arrivalSweep.job.ts` (`ARRIVAL_SWEEP_CRON`, every minute) is the bridge. It finds `REGISTERED` guests whose scheduled arrival falls inside `ARRIVAL_LOOKAHEAD_MIN` (default 45), and turns each into a `QueueEntry` with `earliestAt` clamped to the landing time and a `deadlineAt` 45 minutes after it. Three details make it safe to run on a cron rather than once:
+`arrivalSweep.job.js` (`ARRIVAL_SWEEP_CRON`, every minute) is the bridge. It finds `REGISTERED` guests whose scheduled arrival falls inside `ARRIVAL_LOOKAHEAD_MIN` (default 45), and turns each into a `QueueEntry` with `earliestAt` clamped to the landing time and a `deadlineAt` 45 minutes after it. Three details make it safe to run on a cron rather than once:
 
 1. **The lower bound of the window is open-ended.** It matches everything arriving *before* `now + lookahead`, not a band around it. A sweep that didn't run — a restart, a deploy, a paused free-tier instance — otherwise strands every guest whose window elapsed while it was down.
 2. **It is idempotent and re-entrant.** A guest already holding an open (`waiting`/`matching`) queue entry or a `currentTripId` is skipped, so overlapping runs or a crash mid-sweep cannot double-book anyone. This is a `find`-then-skip rather than a unique index because the skip condition spans two collections.
-3. **The trip type comes from the event phase, not from the guest.** `EventPhaseService.defaultTripType()` matches `now` against `EventConfig.phases` — a **half-open** `[startAt, endAt)` window, so back-to-back phases (the seed defines exactly one such boundary, 18:00 on day 2) never both match. Outside every configured phase it falls back to `ARRIVAL_PICKUP` rather than throwing: a dispatch tick must never fail because the clock drifted past the last configured phase. That's G4, and it is a pure module with no DB dependency precisely so it can be unit-tested against a fixed clock (`tests/unit/eventPhase.test.ts`).
+3. **The trip type comes from the event phase, not from the guest.** `EventPhaseService.defaultTripType()` matches `now` against `EventConfig.phases` — a **half-open** `[startAt, endAt)` window, so back-to-back phases (the seed defines exactly one such boundary, 18:00 on day 2) never both match. Outside every configured phase it falls back to `ARRIVAL_PICKUP` rather than throwing: a dispatch tick must never fail because the clock drifted past the last configured phase. That's G4, and it is a pure module with no DB dependency precisely so it can be unit-tested against a fixed clock (`tests/unit/eventPhase.test.js`).
 
 ## 4. The matching algorithm
 
-`DispatchEngine.tick()` (`apps/server/src/services/dispatch/DispatchEngine.ts`) runs three strategies in this order, each cheaper and less disruptive than the next:
+`DispatchEngine.tick()` (`apps/server/src/services/dispatch/DispatchEngine.js`) runs three strategies in this order, each cheaper and less disruptive than the next:
 
 1. **Detour insertion** (`DetourInserter`) — try to slot a new pickup into a trip that's already moving. Zero new deadhead miles.
 2. **Batch Hungarian assignment** (`BatchAssigner`, via `munkres-js`) — globally optimal for everything detour insertion couldn't absorb, after clustering (`Clusterer`) compatible demands into shared rides and splitting any group larger than the biggest vehicle (`GroupSplitter`).
@@ -87,7 +87,7 @@ priorityScore =
   + (demand.type === 'DEPARTURE_DROP' ? 20 : 0)     // missing a flight is unrecoverable
   + (wasRejectedBefore ? 15 : 0)
 ```
-The `1.5` exponent means a guest who has waited 60 minutes scores roughly **7.8×** a guest who has waited 10 minutes on the wait term alone (`(60/10)^1.5 ≈ 14.7` vs `(10/10)^1.5 = 1`, scaled by the same 10 coefficient) — the queue cannot park someone indefinitely just because they're geographically inconvenient. On top of the soft term, `starvationSweep.job.ts` runs every minute (`STARVATION_SWEEP_CRON`) and force-matches any entry waiting past `starvationThresholdMin` (default 20) against the nearest feasible driver via `GreedyMatcher`, pre-empting optimality in favour of fairness. If even that finds nothing feasible, an `UNASSIGNABLE`-class alert fires with a reason code.
+The `1.5` exponent means a guest who has waited 60 minutes scores roughly **7.8×** a guest who has waited 10 minutes on the wait term alone (`(60/10)^1.5 ≈ 14.7` vs `(10/10)^1.5 = 1`, scaled by the same 10 coefficient) — the queue cannot park someone indefinitely just because they're geographically inconvenient. On top of the soft term, `starvationSweep.job.js` runs every minute (`STARVATION_SWEEP_CRON`) and force-matches any entry waiting past `starvationThresholdMin` (default 20) against the nearest feasible driver via `GreedyMatcher`, pre-empting optimality in favour of fairness. If even that finds nothing feasible, an `UNASSIGNABLE`-class alert fires with a reason code.
 
 ### Complexity and the greedy fallback
 Hungarian is O(n³); at 100 drivers × 100 demands that's ~10⁶ operations, comfortably single-digit milliseconds in Node. Above a 150×150 matrix, `BatchAssigner` falls back to a greedy nearest-first assignment (sorted by cost, skipping already-used rows/columns) rather than paying cubic cost at a scale this event will never reach — documented explicitly as a threshold, not a silent behavior change.
@@ -98,10 +98,10 @@ Hungarian is O(n³); at 100 drivers × 100 demands that's ~10⁶ operations, com
 
 ## 6. Detour insertion: live position, capacity-throughout, existing-deadline protection
 
-`DetourInserter.findBest()` (`apps/server/src/services/dispatch/DetourInserter.ts`) tries inserting a new pickup/drop pair at every valid position in an in-progress trip's remaining stops. Three details make this correct rather than decorative:
+`DetourInserter.findBest()` (`apps/server/src/services/dispatch/DetourInserter.js`) tries inserting a new pickup/drop pair at every valid position in an in-progress trip's remaining stops. Three details make this correct rather than decorative:
 
 1. **The origin is the driver's live GPS position**, not the trip's original start — a driver already halfway to the airport is evaluated from where they actually are.
-2. **`capacityHoldsThroughout`** walks the candidate stop sequence accumulating `+seats` on pickups and `−seats` on drops, asserting the running total never exceeds capacity *at any point in the sequence* — not just in the final total. Checking only the end-state total is the classic bug that lets a 5th person board a 4-seat car between two intermediate stops; there's a dedicated unit test for exactly this (`tests/unit/detourInserter.test.ts`).
+2. **`capacityHoldsThroughout`** walks the candidate stop sequence accumulating `+seats` on pickups and `−seats` on drops, asserting the running total never exceeds capacity *at any point in the sequence* — not just in the final total. Checking only the end-state total is the classic bug that lets a 5th person board a 4-seat car between two intermediate stops; there's a dedicated unit test for exactly this (`tests/unit/detourInserter.test.js`).
 3. **`breaksAnyExistingDeadline`** re-derives the whole trip's completion time under the new stop order and rejects the insertion if it would slip past the trip's own `deadlineAt`. An existing guest is never sacrificed for a new one.
 
 A cheap pre-filter (haversine distance from the driver to the new pickup) and a hard cap on `(active trips) × (candidate positions)` evaluations per tick keep this bounded, since it's the one part of the matching path that issues a routing call per candidate rather than one batched matrix call.
@@ -127,7 +127,7 @@ OSRM's public demo has no live traffic data. Rather than fake it, `TrafficModel`
 
 ## 10. Role separation
 
-Enforced server-side, independently of the frontend: every driver-role handler resolves its target with `Trip.findOne({ _id, driverId: req.user.driverId })` — a driver requesting another driver's trip gets a **404, not a 403** (no existence leak), proven by an automated RBAC test suite (`tests/integration/rbac.test.ts`) that also asserts a driver token never reaches `/api/admin/*` or `/api/dispatch/*`, a guest token never reaches `/api/driver/*` or `/api/admin/*`, and no `/api/driver/*` response body ever contains another driver's id. The frontend's `RequireRole` (redirecting a driver hitting `/` straight to `/driver`) is pure UX — removing it would degrade the experience, not create a security hole, because the server never trusted the client's routing in the first place.
+Enforced server-side, independently of the frontend: every driver-role handler resolves its target with `Trip.findOne({ _id, driverId: req.user.driverId })` — a driver requesting another driver's trip gets a **404, not a 403** (no existence leak), proven by an automated RBAC test suite (`tests/integration/rbac.test.js`) that also asserts a driver token never reaches `/api/admin/*` or `/api/dispatch/*`, a guest token never reaches `/api/driver/*` or `/api/admin/*`, and no `/api/driver/*` response body ever contains another driver's id. The frontend's `RequireRole` (redirecting a driver hitting `/` straight to `/driver`) is pure UX — removing it would degrade the experience, not create a security hole, because the server never trusted the client's routing in the first place.
 
 ## 11. Degradation strategy
 
