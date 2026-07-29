@@ -102,7 +102,7 @@ To wipe and re-seed from scratch:
 ```bash
 npm run seed:fresh
 ```
-> **Windows/PowerShell note:** `npm run <script> -- <args>` does not reliably forward the trailing args through a workspace script on some npm/PowerShell combinations (confirmed on npm 10.9.2 + PowerShell — works fine in Git Bash). That's why `--fresh` is its own dedicated script (`seed:fresh`) rather than a forwarded flag. If you ever need to pass ad-hoc CLI args to a workspace script and `--` isn't forwarding, run it directly instead: `cd apps/server && npx tsx <script> <args>`.
+> **Windows/PowerShell note:** `npm run <script> -- <args>` does not reliably forward the trailing args through a workspace script on some npm/PowerShell combinations (confirmed on npm 10.9.2 + PowerShell — works fine in Git Bash). That's why `--fresh` is its own dedicated script (`seed:fresh`) rather than a forwarded flag. If you ever need to pass ad-hoc CLI args to a workspace script and `--` isn't forwarding, run it directly instead: `cd apps/server && node <script> <args>`.
 
 Run the test suite (unit + integration, `mongodb-memory-server`, no external dependency):
 ```bash
