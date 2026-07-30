@@ -218,9 +218,40 @@ guestRouter.delete('/requests/:id', (0, _asyncHandler.asyncHandler)(async (req, 
     guestId: guestId(req)
   });
   if (!request) throw new _errors.NotFoundError('Request');
-  if (request.status !== 'pending_approval') throw new _errors.ConflictError('Only a pending request can be cancelled');
+  const gid = guestId(req);
+
+  // `approved` is cancellable too, not just `pending_approval`. Approval only
+  // puts the guest in the dispatch queue — finding a driver can take several
+  // ticks when the fleet is busy, and refusing to cancel during that wait left
+  // them with no way out of a ride they no longer wanted until a driver had
+  // been assigned to them.
+  if (!['pending_approval', 'approved'].includes(request.status)) {
+    throw new _errors.ConflictError(request.status === 'matched' ? 'A driver is already assigned — cancel the ride instead' : 'This request can no longer be cancelled');
+  }
+
+  // The engine can match them between the tap and this handler. Their demand is
+  // now a real trip with a driver committed to it, so it has to be stood down
+  // through the ride-cancel path rather than by expiring the request.
+  const alreadyRiding = await findActiveTrip(gid);
+  if (alreadyRiding) {
+    throw new _errors.ConflictError('A driver was just assigned — cancel the ride instead');
+  }
   request.status = 'expired';
   await request.save();
+
+  // Approval created a queue entry for this request; retire it or the engine
+  // keeps trying to place a ride the guest has called off.
+  await _QueueEntry.QueueEntry.updateMany({
+    sourceRequestId: request._id,
+    status: {
+      $in: ['waiting', 'matching']
+    }
+  }, {
+    $set: {
+      status: 'failed',
+      lastFailureReason: 'cancelled_by_guest'
+    }
+  });
 
   // The guest's status was flipped to 'queued' when the request was raised
   // (POST /requests) — revert it now that nothing is pending, but only if
@@ -228,7 +259,6 @@ guestRouter.delete('/requests/:id', (0, _asyncHandler.asyncHandler)(async (req, 
   // queue entry alongside an on-demand request, and dropping them to
   // `registered` while that entry is live leaves the admin's guest list
   // disagreeing with the queue they are actually sitting in.
-  const gid = guestId(req);
   const [openEntries, activeTrip] = await Promise.all([_QueueEntry.QueueEntry.countDocuments({
     guestIds: gid,
     status: {

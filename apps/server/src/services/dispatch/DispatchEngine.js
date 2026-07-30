@@ -6,7 +6,9 @@ Object.defineProperty(exports, "__esModule", {
 exports.DispatchEngine = void 0;
 var _EventConfig = require("../../models/EventConfig");
 var _QueueEntry = require("../../models/QueueEntry");
+var _RideRequest = require("../../models/RideRequest");
 var _Trip = require("../../models/Trip");
+var _logger = require("../../config/logger");
 var _Guest = require("../../models/Guest");
 var _geo = require("../../utils/geo");
 var _time = require("../../utils/time");
@@ -238,6 +240,12 @@ async function commitAssignment(driverDoc, demand, pending, strategy, score, bre
   }).lean();
   const guestIds = entryDocs.flatMap(e => e.guestIds.map(g => g.toString()));
   const guests = await buildGuestLineItems(guestIds);
+  // An entry raised by an on-demand request carries the request it came from.
+  // Only the admin-approval path used to close that loop, and only when it
+  // matched a driver on the spot — so a request the engine placed a tick or two
+  // later stayed `approved` for ever, leaving the guest watching "Finding your
+  // driver…" while their driver was already assigned.
+  const sourceRequestId = entryDocs.find(e => e.sourceRequestId)?.sourceRequestId ?? null;
   const trip = await _TripService.TripService.createFromAssignment({
     type: demand.type,
     driverId: driverDoc._id.toString(),
@@ -273,8 +281,28 @@ async function commitAssignment(driverDoc, demand, pending, strategy, score, bre
     candidatesConsidered,
     decidedBy: 'engine',
     groupSplitId: pending.groupSplitId,
-    sourceRequestId: null
+    sourceRequestId
   });
+  if (sourceRequestId) {
+    await _RideRequest.RideRequest.updateOne({
+      _id: sourceRequestId,
+      status: {
+        $in: ['approved', 'pending_approval']
+      }
+    }, {
+      $set: {
+        status: 'matched',
+        tripId: trip._id
+      }
+    });
+    const requestDoc = await _RideRequest.RideRequest.findById(sourceRequestId).select('guestId').lean();
+    if (requestDoc) {
+      _NotificationService.NotificationService.requestStatus(requestDoc.guestId.toString(), {
+        requestId: sourceRequestId.toString(),
+        status: 'matched'
+      });
+    }
+  }
   _NotificationService.NotificationService.tripOffered(driverDoc._id.toString(), {
     trip: trip.toJSON()
   });
@@ -661,7 +689,15 @@ const DispatchEngine = {
       // Letting it propagate surfaced a raw 409 "Driver was assigned by another
       // process" on the admin's Approve button, even though the approval itself
       // had already succeeded and the demand was safely queued.
-      void err;
+      //
+      // Logged rather than discarded: swallowing this silently turns any other
+      // commit failure into an unexplained "not matched", which is very hard to
+      // tell apart from a genuine lack of supply.
+      _logger.logger.warn({
+        err: err instanceof Error ? err.message : String(err),
+        entryId,
+        driverId: result.driver._id.toString()
+      }, 'matchEntryNow could not commit the assignment');
       return false;
     }
     return true;

@@ -118,14 +118,26 @@ export default function Request() {
   async function handleCancel() {
     if (!activeRequestId) return;
     setCancelling(true);
+    setCancelError(null);
     try {
       await guestApi.cancelRequest(activeRequestId);
       setActiveRequestId(null);
       queryClient.invalidateQueries({
         queryKey: guestKeys.me
       });
-    } catch {
-      // Leave the stepper visible; the guest can retry.
+    } catch (err) {
+      // Swallowing this left the guest tapping a button that silently did
+      // nothing. The common case is a real, actionable race: the engine
+      // assigned a driver between the tap and the request landing, so the
+      // server says to cancel the ride instead — refreshing swaps the stepper
+      // over to the button that does that.
+      setCancelError(err instanceof ApiError ? err.message : 'Could not cancel. Please try again.');
+      queryClient.invalidateQueries({
+        queryKey: guestKeys.request(activeRequestId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: guestKeys.tripCurrent
+      });
     } finally {
       setCancelling(false);
       setCancelConfirmOpen(false);
@@ -155,9 +167,11 @@ export default function Request() {
       </div>;
   }
   if (activeRequestId && pendingQuery.data) {
+    const trip = tripResp?.trip;
     return <div className="p-4 pb-6">
-        <RequestStepper request={pendingQuery.data} trip={tripResp?.trip} onCancel={() => setCancelConfirmOpen(true)} cancelling={cancelling} />
+        <RequestStepper request={pendingQuery.data} trip={trip} onCancel={() => setCancelConfirmOpen(true)} cancelling={cancelling} onCancelRide={isTripActive(trip) ? () => setCancelTripOpen(true) : null} cancellingRide={cancellingTrip} cancelError={cancelError} />
         <ConfirmDialog open={cancelConfirmOpen} title="Cancel this request?" message="You'll lose your place and will need to submit a new request if you still need a ride." confirmLabel="Cancel request" danger loading={cancelling} onConfirm={handleCancel} onCancel={() => setCancelConfirmOpen(false)} />
+        <ConfirmDialog open={cancelTripOpen} title="Cancel this ride?" message="Your driver will be released to another guest. You'll need to request a new ride if you still need one." confirmLabel="Cancel ride" danger loading={cancellingTrip} onConfirm={() => trip && handleCancelTrip(trip.id)} onCancel={() => setCancelTripOpen(false)} />
       </div>;
   }
   // Only real failures get the error screen. A 404 is handled above by dropping

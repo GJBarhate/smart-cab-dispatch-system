@@ -4,6 +4,9 @@ import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 const STEP_LABELS = ['Requested', 'Approval', 'Driver assigned', 'On the way'];
 const TRIP_ON_THE_WAY_STATUSES = new Set(['en_route_pickup', 'at_pickup', 'boarded']);
+// Mirrors what DELETE /guest/requests/:id accepts. Once `matched` the guest has
+// a real trip and cancels it through the ride-cancel path instead.
+const CANCELLABLE_REQUEST_STATUSES = new Set(['pending_approval', 'approved']);
 
 // "Requested" (index 0) is complete the instant a request exists, so the active
 // step is always at least 1 — it marks what's currently in progress, not what's done.
@@ -20,7 +23,10 @@ export function RequestStepper({
   request,
   trip,
   onCancel,
-  cancelling
+  cancelling,
+  onCancelRide,
+  cancellingRide,
+  cancelError
 }) {
   if (request.status === 'declined') {
     return <Card className="text-center">
@@ -68,8 +74,21 @@ export function RequestStepper({
 
       <p className="mt-4 text-center text-xs text-faint">Your driver is assigned automatically for the fastest pickup.</p>
 
-      {request.status === 'pending_approval' && <Button variant="danger" fullWidth className="mt-4" onClick={onCancel} loading={cancelling}>
-          Cancel request
+      {/* Cancellable right through the wait for a driver, not just before
+          approval. Finding a driver can take several ticks when the fleet is
+          busy, and that wait was previously a dead end — no cancel until
+          someone had already been assigned to them. */}
+      {CANCELLABLE_REQUEST_STATUSES.has(request.status) && !onTheWay && <Button variant="danger" fullWidth className="mt-4" onClick={onCancel} loading={cancelling}>
+          {request.status === 'pending_approval' ? 'Cancel request' : 'Cancel this ride'}
         </Button>}
+
+      {/* Once a driver is committed the request is closed, so calling it off
+          means cancelling the trip. Not offered after boarding — the guest is
+          in the vehicle and the API refuses. */}
+      {!CANCELLABLE_REQUEST_STATUSES.has(request.status) && onCancelRide && trip && trip.status !== 'boarded' && <Button variant="danger" fullWidth className="mt-4" onClick={onCancelRide} loading={cancellingRide}>
+          Cancel this ride
+        </Button>}
+
+      {cancelError && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{cancelError}</p>}
     </Card>;
 }

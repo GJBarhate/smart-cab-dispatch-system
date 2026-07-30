@@ -17,6 +17,7 @@ import { Driver } from '../../models/Driver';
 import { Guest } from '../../models/Guest';
 import { Trip } from '../../models/Trip';
 import { QueueEntry } from '../../models/QueueEntry';
+import { RideRequest } from '../../models/RideRequest';
 import { toGeoPoint } from '../../utils/geo';
 
 const app = createApp();
@@ -181,6 +182,74 @@ describe('cancelling a ride that is already assigned', () => {
     const after = await Driver.findById(driver._id).lean();
     expect(after.currentTripId).toBeNull();
     expect(after.status).toBe('idle');
+  });
+});
+
+describe('cancelling while waiting for a driver', () => {
+  function cancelRequest(token, id) {
+    return request(app).delete(`/api/guest/requests/${id}`).set('Authorization', `Bearer ${token}`);
+  }
+
+  /** Mirrors admin approval: request approved, demand queued, no driver yet. */
+  async function approveInto(guest, requestId) {
+    await RideRequest.updateOne({ _id: requestId }, { $set: { status: 'approved' } });
+    return QueueEntry.create({
+      type: 'ON_DEMAND',
+      guestIds: [guest._id],
+      seats: 1,
+      luggage: 1,
+      pickup: { locationId: null, coordinates: toGeoPoint({ lat: 18.55, lng: 73.85 }), label: 'P' },
+      dropoff: { locationId: null, coordinates: toGeoPoint({ lat: 18.56, lng: 73.86 }), label: 'D' },
+      earliestAt: new Date(),
+      deadlineAt: new Date(Date.now() + 60 * 60_000),
+      enqueuedAt: new Date(),
+      priorityTier: 1,
+      status: 'waiting',
+      sourceRequestId: requestId
+    });
+  }
+
+  it('lets the guest cancel an approved request still hunting for a driver', async () => {
+    await makeEventConfig();
+    const { guest, token } = await makeGuest();
+    const created = await book(token);
+    const entry = await approveInto(guest, created.body.data.id);
+
+    // Before, this window refused with "Only a pending request can be
+    // cancelled" — a dead end for however long the fleet stayed busy.
+    expect((await cancelRequest(token, created.body.data.id)).status).toBe(200);
+
+    expect((await RideRequest.findById(created.body.data.id).lean()).status).toBe('expired');
+    const afterEntry = await QueueEntry.findById(entry._id).lean();
+    // Left waiting, the engine would keep placing a ride they called off.
+    expect(afterEntry.status).toBe('failed');
+    expect(afterEntry.lastFailureReason).toBe('cancelled_by_guest');
+    expect((await Guest.findById(guest._id).lean()).status).toBe('registered');
+  });
+
+  it('redirects to the ride-cancel path when a driver landed in the meantime', async () => {
+    await makeEventConfig();
+    const { guest, token } = await makeGuest();
+    const created = await book(token);
+    await approveInto(guest, created.body.data.id);
+    await giveTrip(guest, 'accepted');
+
+    const res = await cancelRequest(token, created.body.data.id);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/cancel the ride instead/i);
+  });
+
+  it('refuses to expire a request that already became a trip', async () => {
+    await makeEventConfig();
+    const { token } = await makeGuest();
+    const created = await book(token);
+    await RideRequest.updateOne({ _id: created.body.data.id }, { $set: { status: 'matched' } });
+
+    const res = await cancelRequest(token, created.body.data.id);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/cancel the ride instead/i);
   });
 });
 
