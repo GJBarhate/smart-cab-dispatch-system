@@ -17,11 +17,13 @@ import { makeEventConfig, makeDriver, makeGuest } from '../helpers/fixtures';
 import { DriverStateService } from '../../services/dispatch/DriverStateService';
 import { TripService } from '../../services/dispatch/TripService';
 import { AlertService } from '../../services/AlertService';
+import { __insertDetour } from '../../services/dispatch/DispatchEngine';
 import { toDispatchConfig } from '../../services/dispatch/config';
 import { Driver } from '../../models/Driver';
 import { Alert } from '../../models/Alert';
 import { EventConfig } from '../../models/EventConfig';
 import { Guest } from '../../models/Guest';
+import { Trip } from '../../models/Trip';
 import { QueueEntry } from '../../models/QueueEntry';
 import { toGeoPoint } from '../../utils/geo';
 
@@ -124,6 +126,75 @@ describe('alert folding', () => {
     await AlertService.raise('warning', 'UNASSIGNABLE', 'second');
     expect(await Alert.countDocuments({ code: 'UNASSIGNABLE' })).toBe(2);
     expect(await Alert.countDocuments({ code: 'UNASSIGNABLE', acknowledged: false })).toBe(1);
+  });
+});
+
+describe('detour insertion is idempotent', () => {
+  // The tick lock is held 25s while the cron fires every 30s, so a slow tick
+  // overlaps the next. Both passes then read the same entry as `waiting`.
+  it('never lists the same guest on a trip twice, nor charges their seat twice', async () => {
+    const { driver } = await makeDriver('Detour Driver');
+    const { guest: rider } = await makeGuest('Already Aboard');
+    const { guest: joiner } = await makeGuest('Joining Late');
+
+    const trip = await TripService.createFromAssignment({
+      type: 'ON_DEMAND',
+      driverId: driver._id.toString(),
+      entryIds: [],
+      guests: [{ guestId: rider._id.toString(), name: rider.name, seats: 1, luggage: 1 }],
+      stops: [
+        { kind: 'pickup', guestIds: [rider._id.toString()], locationId: null, coordinates: { lat: 18.55, lng: 73.85 }, label: 'P' },
+        { kind: 'drop', guestIds: [rider._id.toString()], locationId: null, coordinates: { lat: 18.56, lng: 73.86 }, label: 'D' }
+      ],
+      vehicleSnapshot: { number: 'KA-9', model: 'SUV', seats: 6, luggage: 5 },
+      capacityUsed: { seats: 1, luggage: 1 },
+      deadlineAt: new Date(Date.now() + 60 * 60_000),
+      strategy: 'greedy_realtime',
+      score: 1,
+      costBreakdown: {},
+      candidatesConsidered: 1,
+      decidedBy: 'engine',
+      groupSplitId: null,
+      sourceRequestId: null
+    });
+
+    const entry = await QueueEntry.create({
+      type: 'ON_DEMAND',
+      guestIds: [joiner._id],
+      seats: 2,
+      luggage: 1,
+      pickup: { locationId: null, coordinates: toGeoPoint({ lat: 18.55, lng: 73.85 }), label: 'P' },
+      dropoff: { locationId: null, coordinates: toGeoPoint({ lat: 18.56, lng: 73.86 }), label: 'D' },
+      earliestAt: new Date(),
+      deadlineAt: new Date(Date.now() + 60 * 60_000),
+      enqueuedAt: new Date(),
+      priorityTier: 1,
+      status: 'waiting'
+    });
+
+    const insertion = {
+      tripId: trip._id.toString(),
+      addedMinutes: 4,
+      stops: [
+        { kind: 'pickup', guestIds: [rider._id.toString()], locationId: null, coordinates: { lat: 18.55, lng: 73.85 }, label: 'P' },
+        { kind: 'pickup', guestIds: [joiner._id.toString()], locationId: null, coordinates: { lat: 18.555, lng: 73.855 }, label: 'P2' },
+        { kind: 'drop', guestIds: [rider._id.toString(), joiner._id.toString()], locationId: null, coordinates: { lat: 18.56, lng: 73.86 }, label: 'D' }
+      ]
+    };
+
+    // Two overlapping passes racing on the same entry.
+    const [first, second] = await Promise.all([
+      __insertDetour(entry, insertion, new Date()),
+      __insertDetour(entry, insertion, new Date())
+    ]);
+
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+    const after = await Trip.findById(trip._id).lean();
+    const ids = after.guests.map(g => g.guestId.toString());
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toHaveLength(2);
+    // 1 seat for the original rider + 2 for the joiner — not 5.
+    expect(after.capacityUsed.seats).toBe(3);
   });
 });
 

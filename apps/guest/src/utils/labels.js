@@ -17,6 +17,14 @@ export const TRIP_STATUS_LABEL = {
   rejected: 'Reassigning…',
   unassignable: 'Finding another option'
 };
+// A trip in one of these states is still the guest's live ride. Kept in step
+// with ACTIVE_TRIP_STATUSES in the server's guest.routes.js, which rejects a
+// second ride request while any of them is in flight — the screen must not
+// offer an action the API will refuse.
+export const TRIP_ACTIVE_STATUSES = ['pending_driver', 'accepted', 'en_route_pickup', 'at_pickup', 'boarded'];
+export function isTripActive(trip) {
+  return !!trip && TRIP_ACTIVE_STATUSES.includes(trip.status);
+}
 export function tripStatusTone(status) {
   if (status === 'completed') return 'success';
   if (status === 'cancelled' || status === 'rejected') return 'danger';

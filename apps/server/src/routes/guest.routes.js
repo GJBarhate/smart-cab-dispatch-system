@@ -9,6 +9,7 @@ var _zod = require("zod");
 var _Guest = require("../models/Guest");
 var _Trip = require("../models/Trip");
 var _RideRequest = require("../models/RideRequest");
+var _QueueEntry = require("../models/QueueEntry");
 var _Location = require("../models/Location");
 var _asyncHandler = require("../middleware/asyncHandler");
 var _validate = require("../middleware/validate");
@@ -104,6 +105,24 @@ const createRequestSchema = _zod.z.object({
   reason: _zod.z.string().default(''),
   notes: _zod.z.string().default('')
 });
+// A trip in one of these states is still the guest's live ride. Kept in step
+// with TRIP_ACTIVE_STATUSES in the guest app's utils/labels.js, so the screen
+// and the API agree on what "already riding" means.
+const ACTIVE_TRIP_STATUSES = ['pending_driver', 'accepted', 'en_route_pickup', 'at_pickup', 'boarded'];
+
+/**
+ * The guest's in-flight trip, read from Trip rather than `guest.currentTripId`.
+ * The pointer can lag — it is cleared by several different paths — whereas the
+ * trip's own status is authoritative.
+ */
+function findActiveTrip(gid) {
+  return _Trip.Trip.findOne({
+    'guests.guestId': gid,
+    status: {
+      $in: ACTIVE_TRIP_STATUSES
+    }
+  }).select('code status');
+}
 async function resolveCoordinates(locationId, lat, lng) {
   if (locationId) {
     const loc = await _Location.Location.findById(locationId);
@@ -133,6 +152,17 @@ guestRouter.post('/requests', (0, _validate.validate)({
     status: 'pending_approval'
   });
   if (existing) throw new _errors.ConflictError('A ride request is already pending approval');
+
+  // A guest already riding must not be able to raise a second request. Without
+  // this the handler below flipped a passenger who was mid-trip to `queued`
+  // — so the admin's guest list showed them waiting while they sat in a moving
+  // cab — and cancelling that request then dropped them to `registered`, which
+  // is exactly the status the arrival sweep re-enqueues from, double-booking a
+  // guest who already had a driver.
+  const activeTrip = await findActiveTrip(gid);
+  if (activeTrip) {
+    throw new _errors.ConflictError(`Ride ${activeTrip.code} is already in progress for this booking`);
+  }
   const body = req.body;
   const pickup = await resolveCoordinates(body.pickupLocationId, body.pickupLat, body.pickupLng);
   const dropoff = await resolveCoordinates(body.dropoffLocationId, body.dropoffLat, body.dropoffLng);
@@ -188,16 +218,30 @@ guestRouter.delete('/requests/:id', (0, _asyncHandler.asyncHandler)(async (req, 
   if (request.status !== 'pending_approval') throw new _errors.ConflictError('Only a pending request can be cancelled');
   request.status = 'expired';
   await request.save();
-  // The guest's status was flipped to 'queued' when the request was
-  // raised (POST /requests) — revert it now that nothing is pending.
-  await _Guest.Guest.updateOne({
-    _id: guestId(req),
-    status: 'queued'
-  }, {
-    $set: {
-      status: 'registered'
+
+  // The guest's status was flipped to 'queued' when the request was raised
+  // (POST /requests) — revert it now that nothing is pending, but only if
+  // nothing else still has them in flight. A guest can hold an arrival-sweep
+  // queue entry alongside an on-demand request, and dropping them to
+  // `registered` while that entry is live leaves the admin's guest list
+  // disagreeing with the queue they are actually sitting in.
+  const gid = guestId(req);
+  const [openEntries, activeTrip] = await Promise.all([_QueueEntry.QueueEntry.countDocuments({
+    guestIds: gid,
+    status: {
+      $in: ['waiting', 'matching']
     }
-  });
+  }), findActiveTrip(gid)]);
+  if (openEntries === 0 && !activeTrip) {
+    await _Guest.Guest.updateOne({
+      _id: gid,
+      status: 'queued'
+    }, {
+      $set: {
+        status: 'registered'
+      }
+    });
+  }
   res.json({
     ok: true,
     data: request

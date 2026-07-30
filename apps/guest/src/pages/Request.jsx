@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { MapPin, Minus, Plus, Send } from 'lucide-react';
+import { CarFront, MapPin, Minus, Plus, Send } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { ListSkeleton } from '../components/ui/Skeleton';
@@ -13,6 +14,7 @@ import { useActiveRequestStore } from '../store/activeRequestStore';
 import { useSocketEvent } from '../hooks/useSocket';
 import { guestApi } from '../api/guest';
 import { ApiError } from '../api/client';
+import { isTripActive, TRIP_STATUS_LABEL } from '../utils/labels';
 const LOCATION_TYPE_LABEL = {
   airport: 'Airports',
   railway_station: 'Railway stations',
@@ -52,6 +54,7 @@ function Stepper({
 export default function Request() {
   const activeRequestId = useActiveRequestStore(s => s.requestId);
   const setActiveRequestId = useActiveRequestStore(s => s.setRequestId);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const pendingQuery = usePendingRequest(activeRequestId);
   const {
@@ -124,6 +127,20 @@ export default function Request() {
         <ErrorState error={pendingQuery.error} onRetry={() => pendingQuery.refetch()} />
       </div>;
   }
+
+  // A ride is already under way. The stepper above covers the case where this
+  // guest raised the request on this device; this catches every other route to
+  // the same state — the trip came from their scheduled arrival, or they signed
+  // in on a different phone, so there is no local requestId to key off.
+  //
+  // Falling through to the form here is what made "Request" look broken: it
+  // offered a booking the API refuses with a 409, so the only way to find out
+  // was to fill it in and submit.
+  if (isTripActive(tripResp?.trip)) {
+    return <div className="p-4">
+        <EmptyState icon={CarFront} title="You already have a ride on the way" subtitle={`${TRIP_STATUS_LABEL[tripResp.trip.status] ?? 'In progress'} · ${tripResp.trip.code}`} action={<Button onClick={() => navigate('/track')}>Track my ride</Button>} />
+      </div>;
+  }
   return <RequestForm guestGroupSize={guest?.groupSize ?? 1} guestLuggage={guest?.luggageCount ?? 1} accommodationId={guest?.accommodationId?.id} />;
 }
 function RequestForm({
@@ -175,10 +192,19 @@ function RequestForm({
         queryKey: guestKeys.me
       });
     } catch (err) {
+      // Use the server's wording rather than assuming the reason: a 409 here
+      // means either a request already pending approval or a ride already under
+      // way, and hardcoding the former told a guest mid-trip the wrong thing.
+      setFormError(err instanceof ApiError ? err.message : 'Could not send your request. Please try again.');
       if (err instanceof ApiError && err.status === 409) {
-        setFormError('You already have a ride request pending approval.');
-      } else {
-        setFormError(err instanceof ApiError ? err.message : 'Could not send your request. Please try again.');
+        // Refresh so the screen can switch to the live-ride state instead of
+        // sitting on a form the API will keep refusing.
+        queryClient.invalidateQueries({
+          queryKey: guestKeys.tripCurrent
+        });
+        queryClient.invalidateQueries({
+          queryKey: guestKeys.me
+        });
       }
     } finally {
       setSubmitting(false);

@@ -28,6 +28,8 @@ var _env = require("../config/env");
 
 const STALE_TRIP_GRACE_HOURS = 6;
 const FALLBACK_SHIFT_DAYS = 7;
+// Mirrors ACTIVE_TRIP_STATUSES in routes/guest.routes.js.
+const ACTIVE_TRIP_STATUSES = ['pending_driver', 'accepted', 'en_route_pickup', 'at_pickup', 'boarded'];
 
 const args = process.argv.slice(2);
 const shouldCloseStaleTrips = args.includes('--close-stale-trips');
@@ -148,6 +150,116 @@ async function foldDuplicateAlerts() {
 }
 
 /**
+ * Realigns a guest's status with the trip they are actually on.
+ *
+ * The trip is authoritative — it is what the driver app drives. A guest whose
+ * status drifts away from it shows up wrong in Guest Management and the
+ * dashboard counts, and a guest left at `registered` mid-trip is worse than
+ * cosmetic: that is the status the arrival sweep enqueues from, so it can raise
+ * fresh demand for someone who already has a driver.
+ */
+async function reconcileGuestStatuses() {
+  const trips = await _Trip.Trip.find({ status: { $in: ACTIVE_TRIP_STATUSES } })
+    .select('code status guests groupSplitId').lean();
+  const fixes = [];
+  const seen = new Set();
+  for (const t of trips) {
+    // Before boarding the guest is `assigned`; once the driver marks them
+    // boarded the driver app moves them to `in_transit`.
+    const expected = t.status === 'boarded' ? 'in_transit' : 'assigned';
+    for (const line of t.guests) {
+      const guest = await _Guest.Guest.findById(line.guestId).select('name status currentTripId').lean();
+      if (!guest) continue;
+      // A split group legitimately rides two vehicles under one guest record,
+      // so `currentTripId` can only ever name one of its legs. Judge those on
+      // status alone, and only once.
+      const isSplitLeg = !!t.groupSplitId;
+      const key = String(guest._id);
+      if (isSplitLeg && seen.has(key)) continue;
+      seen.add(key);
+      const pointerWrong = !isSplitLeg && String(guest.currentTripId) !== String(t._id);
+      if (guest.status !== expected || pointerWrong) {
+        fixes.push({ guest, tripId: t._id, code: t.code, tripStatus: t.status, expected, isSplitLeg });
+      }
+    }
+  }
+  if (fixes.length === 0) {
+    log(`guest status  : ok — every guest agrees with their live trip`);
+    return 0;
+  }
+  log(`guest status  : ${fixes.length} guest(s) out of step with their live trip`);
+  fixes.forEach(f => log(`                - ${f.guest.name} on ${f.code} (${f.tripStatus}): '${f.guest.status}' -> '${f.expected}'`));
+  if (dryRun) return fixes.length;
+
+  for (const f of fixes) {
+    const set = { status: f.expected };
+    // Leave a split group's pointer alone — either leg is equally valid.
+    if (!f.isSplitLeg) set.currentTripId = f.tripId;
+    await _Guest.Guest.updateOne({ _id: f.guest._id }, { $set: set });
+  }
+  return fixes.length;
+}
+
+/**
+ * Removes a guest listed more than once on the same trip and recharges the
+ * vehicle's capacity to match the corrected manifest.
+ *
+ * Detour insertion had no idempotency guard, so an entry processed by two
+ * overlapping ticks appended its guests twice — leaving manifests that read
+ * "Krishna Iyer, Krishna Iyer" and seats charged for a passenger who does not
+ * exist, which in turn made the vehicle look full to Feasibility.
+ */
+async function dedupeTripManifests() {
+  const trips = await _Trip.Trip.find({ status: { $in: ACTIVE_TRIP_STATUSES } })
+    .select('code status guests capacityUsed');
+  const fixed = [];
+  for (const t of trips) {
+    const seen = new Set();
+    const unique = [];
+    const dupes = [];
+    for (const g of t.guests) {
+      const k = g.guestId.toString();
+      if (seen.has(k)) dupes.push(g);
+      else {
+        seen.add(k);
+        unique.push(g);
+      }
+    }
+    if (dupes.length === 0) continue;
+    // Subtract exactly what the duplicate lines added rather than recomputing
+    // the total from the manifest: an on-demand ride is charged the seats its
+    // request asked for, which need not equal the sum of the guests' party
+    // sizes, so a wholesale recompute would quietly rewrite correct figures.
+    fixed.push({
+      code: t.code,
+      removed: dupes.length,
+      seatsBefore: t.capacityUsed?.seats ?? 0,
+      seatsAfter: Math.max(0, (t.capacityUsed?.seats ?? 0) - dupes.reduce((n, g) => n + (g.seats ?? 0), 0)),
+      luggageAfter: Math.max(0, (t.capacityUsed?.luggage ?? 0) - dupes.reduce((n, g) => n + (g.luggage ?? 0), 0)),
+      trip: t,
+      unique
+    });
+  }
+  if (fixed.length === 0) {
+    log(`manifests     : ok — no guest listed twice on a trip`);
+    return 0;
+  }
+  log(`manifests     : ${fixed.length} trip(s) listing a guest more than once`);
+  fixed.forEach(f => log(`                - ${f.code}: removed ${f.removed} duplicate line(s), seats ${f.seatsBefore} -> ${f.seatsAfter}`));
+  if (dryRun) return fixed.length;
+
+  for (const f of fixed) {
+    f.trip.guests = f.unique;
+    f.trip.capacityUsed = {
+      seats: f.seatsAfter,
+      luggage: f.luggageAfter
+    };
+    await f.trip.save();
+  }
+  return fixed.length;
+}
+
+/**
  * A guest sitting at `queued` with no live QueueEntry is invisible: the tick
  * only reads `waiting` entries, and the arrival sweep only reconsiders guests
  * back at `registered`. Offer expiry used to leave exactly this state behind.
@@ -256,8 +368,12 @@ async function closeStaleTrips(now) {
   // considered in the same pass.
   const trips = await closeStaleTrips(now);
   const stranded = await recoverStrandedGuests();
+  const manifests = await dedupeTripManifests();
+  // Last, so it sees the state the steps above have settled on.
+  const guestStatus = await reconcileGuestStatuses();
   log('');
-  log(`summary       : shifts=${shifts} pointers=${pointers} alertsFolded=${alerts} tripsClosed=${trips} strandedRecovered=${stranded}`);
+  log(`summary       : shifts=${shifts} pointers=${pointers} alertsFolded=${alerts} tripsClosed=${trips}`);
+  log(`                strandedRecovered=${stranded} manifestsFixed=${manifests} guestStatusFixed=${guestStatus}`);
   await _mongoose.disconnect();
 })().catch(err => {
   console.error(err);

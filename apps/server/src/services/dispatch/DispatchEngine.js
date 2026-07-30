@@ -279,9 +279,40 @@ async function commitAssignment(driverDoc, demand, pending, strategy, score, bre
     trip: trip.toJSON()
   });
 }
+/**
+ * Folds a waiting entry into a trip already on the road. Returns false when the
+ * entry was not ours to place, so the caller does not count it as matched.
+ *
+ * The entry is claimed atomically up front. The tick lock is held for 25s while
+ * the cron fires every 30s, so a tick that runs long overlaps the next one —
+ * both then read the same entry as `waiting`, and appending on both passes put
+ * the same passenger on a trip twice and double-counted their seats against the
+ * vehicle. Seen on a live trip whose manifest read "Krishna Iyer, Krishna Iyer"
+ * with capacity charged for both.
+ */
 async function insertDetour(entry, insertion, now) {
+  const claimed = await _QueueEntry.QueueEntry.findOneAndUpdate({
+    _id: entry._id,
+    status: 'waiting'
+  }, {
+    $set: {
+      status: 'assigned'
+    }
+  });
+  if (!claimed) return false;
   const trip = await _Trip.Trip.findById(insertion.tripId);
-  if (!trip) return;
+  if (!trip) {
+    // Put it back rather than stranding it as `assigned` against a trip that
+    // no longer exists — nothing reads `assigned` entries as demand.
+    await _QueueEntry.QueueEntry.updateOne({
+      _id: entry._id
+    }, {
+      $set: {
+        status: 'waiting'
+      }
+    });
+    return false;
+  }
   trip.stops = insertion.stops.map((s, i) => ({
     seq: i,
     kind: s.kind,
@@ -294,11 +325,19 @@ async function insertDetour(entry, insertion, now) {
     actualAt: null,
     status: 'pending'
   }));
+  // Second line of defence behind the claim above: never list a guest on the
+  // same trip twice, whatever route got us here.
+  const alreadyAboard = new Set(trip.guests.map(g => g.guestId.toString()));
+  const boarding = (await buildGuestLineItems(entry.guestIds.map(g => g.toString()))).filter(g => !alreadyAboard.has(g.guestId.toString()));
+  if (boarding.length === 0) return false;
+  // Charged from the entry, not the guest line items: for an on-demand ride the
+  // entry carries the seats actually requested, which need not equal the
+  // guest's default party size.
   trip.capacityUsed = {
     seats: (trip.capacityUsed?.seats ?? 0) + entry.seats,
     luggage: (trip.capacityUsed?.luggage ?? 0) + entry.luggage
   };
-  trip.guests.push(...(await buildGuestLineItems(entry.guestIds.map(g => g.toString()))).map(g => ({
+  trip.guests.push(...boarding.map(g => ({
     guestId: g.guestId,
     name: g.name,
     seats: g.seats,
@@ -318,13 +357,6 @@ async function insertDetour(entry, insertion, now) {
     }
   });
   await trip.save();
-  await _QueueEntry.QueueEntry.updateOne({
-    _id: entry._id
-  }, {
-    $set: {
-      status: 'assigned'
-    }
-  });
   await _Guest.Guest.updateMany({
     _id: {
       $in: entry.guestIds
@@ -335,6 +367,7 @@ async function insertDetour(entry, insertion, now) {
       currentTripId: trip._id
     }
   });
+  return true;
 }
 const DispatchEngine = {
   async tick() {
@@ -407,8 +440,10 @@ const DispatchEngine = {
             continue;
           }
           try {
-            await insertDetour(entry, insertion, now);
-            matched++;
+            // A false return means another pass already claimed this entry —
+            // it is placed, just not by us, so it is neither matched here nor
+            // pushed back into this tick's waiting list.
+            if (await insertDetour(entry, insertion, now)) matched++;
           } catch (err) {
             // Most likely a Mongoose VersionError: the driver accepted/
             // arrived/boarded/dropped this same trip between findBest()
@@ -735,3 +770,8 @@ const DispatchEngine = {
   }
 };
 exports.DispatchEngine = DispatchEngine;
+
+// Exported for tests only. The guard inside is a concurrency property — two
+// overlapping ticks racing on one entry — which cannot be provoked through
+// tick() without standing up a live routing fixture to make a detour viable.
+exports.__insertDetour = insertDetour;
