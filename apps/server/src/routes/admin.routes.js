@@ -69,9 +69,7 @@ adminRouter.get('/dashboard', (0, _asyncHandler.asyncHandler)(async (_req, res) 
     }
   }]), _QueueEntry.QueueEntry.countDocuments({
     status: 'waiting'
-  }), _QueueEntry.QueueEntry.countDocuments({
-    status: 'failed'
-  }), _Trip.Trip.countDocuments({
+  }), _QueueEntry.QueueEntry.countStuck(), _Trip.Trip.countDocuments({
     status: 'completed',
     completedAt: {
       $gte: new Date(new Date().setHours(0, 0, 0, 0))

@@ -119,9 +119,7 @@ async function runArrivalSweep(now = new Date()) {
   if (enqueued > 0) {
     const [depth, unassignableCount, oldest] = await Promise.all([_QueueEntry.QueueEntry.countDocuments({
       status: 'waiting'
-    }), _QueueEntry.QueueEntry.countDocuments({
-      status: 'failed'
-    }), _QueueEntry.QueueEntry.findOne({
+    }), _QueueEntry.QueueEntry.countStuck(), _QueueEntry.QueueEntry.findOne({
       status: 'waiting'
     }).sort({
       enqueuedAt: 1

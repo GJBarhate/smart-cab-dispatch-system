@@ -32,6 +32,12 @@ const ALLOWED_TRANSITIONS = {
   rejected: [],
   unassignable: ['pending_driver', 'cancelled']
 };
+// Statuses after which the trip is no longer the driver's work. Releasing here
+// rather than trusting each caller closes a real leak: the trip ends, the
+// caller forgets `releaseDriver`, and the driver keeps `currentTripId` set —
+// which `claimDriver` treats as "already busy", so dispatch silently skips
+// that driver forever while ops sees them sitting idle.
+const DRIVER_RELEASING_STATUSES = new Set(['completed', 'cancelled', 'rejected', 'unassignable']);
 const STATUS_TIMESTAMP_FIELD = {
   accepted: 'acceptedAt',
   rejected: 'rejectedAt',
@@ -61,6 +67,9 @@ const TripService = {
       payload: {}
     });
     await trip.save();
+    if (DRIVER_RELEASING_STATUSES.has(next) && trip.driverId) {
+      await TripService.releaseDriver(trip.driverId.toString());
+    }
     return trip;
   },
   /**
@@ -165,6 +174,21 @@ const TripService = {
       throw err;
     }
   },
+  /**
+   * Sends guests back to the queue after their trip fell through.
+   *
+   * Reopening their QueueEntry is as important as updating the guest: an entry
+   * left at `assigned` while the guest reads `queued` makes that guest
+   * invisible to the whole system. The dispatch tick only reads `waiting`
+   * entries, and the arrival sweep only reconsiders guests back at
+   * `registered` — so nothing ever picks them up again. Seen against a live
+   * database as 29 guests waiting indefinitely after their driver offers timed
+   * out, while the dashboard reported an empty queue and zero unassignable.
+   *
+   * `enqueuedAt` is deliberately left alone so the guest keeps the priority
+   * they have already accrued, and so a caller that boosted it first (the
+   * driver-rejection path) is not overwritten here.
+   */
   async requeueGuests(guestIds, _reason) {
     await _Guest.Guest.updateMany({
       _id: {
@@ -177,13 +201,44 @@ const TripService = {
         waitingSince: new Date()
       }
     });
+    await _QueueEntry.QueueEntry.updateMany({
+      guestIds: {
+        $in: guestIds
+      },
+      status: {
+        $in: ['assigned', 'matching']
+      }
+    }, {
+      $set: {
+        status: 'waiting'
+      }
+    });
   },
+  /**
+   * Hands a driver back to the pool. Clearing `currentTripId` is the part that
+   * matters: `claimDriver` only claims a driver whose pointer is null, so a
+   * driver left holding a finished trip can never be assigned again.
+   *
+   * Status only returns to `idle` from the four statuses that mean "working
+   * this trip". A driver who went offline, took a break, or was suspended
+   * while the trip wound down must not be pulled back on duty by the trip
+   * ending.
+   */
   async releaseDriver(driverId) {
     await _Driver.Driver.updateOne({
       _id: driverId
     }, {
       $set: {
-        currentTripId: null,
+        currentTripId: null
+      }
+    });
+    await _Driver.Driver.updateOne({
+      _id: driverId,
+      status: {
+        $in: ['assigned', 'en_route_pickup', 'at_pickup', 'on_trip']
+      }
+    }, {
+      $set: {
         status: 'idle'
       }
     });

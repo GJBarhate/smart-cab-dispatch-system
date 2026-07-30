@@ -47,6 +47,17 @@ const alertSchema = new _mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // A persistent condition re-raises on every tick. Rather than one row per
+  // tick, the open alert absorbs the repeats — these two fields keep the
+  // "still happening, 47 times now" signal that collapsing would otherwise lose.
+  occurrences: {
+    type: Number,
+    default: 1
+  },
+  lastOccurredAt: {
+    type: Date,
+    default: () => new Date()
+  },
   acknowledgedBy: {
     type: _mongoose.Schema.Types.ObjectId,
     default: null
@@ -59,6 +70,11 @@ const alertSchema = new _mongoose.Schema({
 alertSchema.index({
   acknowledged: 1,
   createdAt: -1
+});
+alertSchema.index({
+  code: 1,
+  'entity.id': 1,
+  acknowledged: 1
 });
 const Alert = (0, _shared.getModel)('Alert', alertSchema);
 exports.Alert = Alert;

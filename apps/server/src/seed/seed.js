@@ -200,9 +200,16 @@ async function seedDrivers() {
           lat: spot.lat,
           lng: spot.lng
         }),
+        // Rostered for the whole event window, not one day. Feasibility
+        // rejects any driver whose shift ends before the trip would
+        // (`shift_ends_before_trip`), so a single-day shift silently turns the
+        // entire fleet infeasible the moment that day ends: drivers still
+        // read `idle` everywhere in the UI while every booking falls straight
+        // through to unassignable, with no eligible-supply warning to explain
+        // it. Keep this aligned with the event window seeded below.
         shift: {
           startAt: day(0, 6),
-          endAt: day(0, 22)
+          endAt: day(4, 23, 59)
         },
         isActive: true
       });

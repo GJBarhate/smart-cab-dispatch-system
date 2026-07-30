@@ -126,5 +126,26 @@ queueEntrySchema.index({
 queueEntrySchema.index({
   'pickup.coordinates': '2dsphere'
 });
+// Demand that has failed this many dispatch passes is reported as
+// unassignable. A single miss is normal churn — an entry enqueued moments ago
+// routinely waits one pass for a driver to free up — so counting from the first
+// failure made the figure equal queue depth whenever the fleet was busy, which
+// told ops nothing. At a 30s tick this is roughly 90 seconds of trying.
+const STUCK_AFTER_ATTEMPTS = 3;
+
+/**
+ * Live count of queued demand the engine has repeatedly failed to place.
+ *
+ * Deliberately not `status: 'failed'`: that is the archive of everything ever
+ * retired, so it only ever grows and left the dashboard tile permanently red.
+ */
+queueEntrySchema.statics.countStuck = function countStuck() {
+  return this.countDocuments({
+    status: 'waiting',
+    attempts: {
+      $gte: STUCK_AFTER_ATTEMPTS
+    }
+  });
+};
 const QueueEntry = (0, _shared.getModel)('QueueEntry', queueEntrySchema);
 exports.QueueEntry = QueueEntry;

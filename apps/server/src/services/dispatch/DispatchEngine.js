@@ -610,11 +610,25 @@ const DispatchEngine = {
     const demand = demandFromSingleEntry(entry, now);
     const result = await _GreedyMatcher.GreedyMatcher.findBest(demand, cfg, now);
     if (!result) return false;
-    await commitAssignment(result.driver, demand, {
-      demand,
-      sourceEntryIds: [entry._id.toString()],
-      groupSplitId: null
-    }, strategy, result.score, result.breakdown, 1);
+    try {
+      await commitAssignment(result.driver, demand, {
+        demand,
+        sourceEntryIds: [entry._id.toString()],
+        groupSplitId: null
+      }, strategy, result.score, result.breakdown, 1);
+    } catch (err) {
+      // `claimDriver` is an atomic findOneAndUpdate, so a concurrent tick, the
+      // starvation sweep, or another approval can take this driver between
+      // findBest() scoring them and this commit. Losing that race means "not
+      // matched right now", not a failure of the caller's request: the entry is
+      // still `waiting` and the next tick assigns it.
+      //
+      // Letting it propagate surfaced a raw 409 "Driver was assigned by another
+      // process" on the admin's Approve button, even though the approval itself
+      // had already succeeded and the demand was safely queued.
+      void err;
+      return false;
+    }
     return true;
   },
   /**

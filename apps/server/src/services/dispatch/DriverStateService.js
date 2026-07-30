@@ -76,16 +76,33 @@ const DriverStateService = {
       status: {
         $in: ['idle', 'assigned', 'on_trip']
       },
-      $or: [{
-        'break.onBreakUntil': null
-      }, {
-        'break.onBreakUntil': {
-          $lte: now
-        }
-      }],
       predictedFreeAt: {
         $lte: horizonAt
-      }
+      },
+      // Both conditions are $or groups, so they have to sit under $and — as
+      // sibling `$or` keys the second would silently replace the first.
+      $and: [{
+        $or: [{
+          'break.onBreakUntil': null
+        }, {
+          'break.onBreakUntil': {
+            $lte: now
+          }
+        }]
+      }, {
+        // A driver past their shift end is not supply. Feasibility already
+        // hard-rejects them (`shift_ends_before_trip`), so counting them here
+        // only made a stale roster look like a healthy fleet: the engine saw
+        // eligible drivers, every pair scored infeasible, and the tick blamed
+        // "could not be matched" instead of reporting the missing supply.
+        $or: [{
+          'shift.endAt': null
+        }, {
+          'shift.endAt': {
+            $gt: now
+          }
+        }]
+      }]
     });
     return drivers.map(doc => ({
       doc,
