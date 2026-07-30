@@ -12,7 +12,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../app';
 import { startTestDb, stopTestDb, clearTestDb } from '../helpers/testDb';
-import { makeEventConfig, makeGuest } from '../helpers/fixtures';
+import { makeDriver, makeEventConfig, makeGuest } from '../helpers/fixtures';
+import { Driver } from '../../models/Driver';
 import { Guest } from '../../models/Guest';
 import { Trip } from '../../models/Trip';
 import { QueueEntry } from '../../models/QueueEntry';
@@ -94,6 +95,92 @@ describe('booking while a ride is already in progress', () => {
     await Guest.updateOne({ _id: guest._id }, { $set: { status: 'registered', currentTripId: null } });
 
     expect((await book(token)).status).toBe(201);
+  });
+});
+
+describe('cancelling a ride that is already assigned', () => {
+  function cancel(token, tripId) {
+    return request(app).post(`/api/guest/trip/${tripId}/cancel`).set('Authorization', `Bearer ${token}`).send({});
+  }
+
+  for (const status of ['pending_driver', 'accepted', 'en_route_pickup', 'at_pickup']) {
+    it(`lets the guest call off a ${status} ride`, async () => {
+      await makeEventConfig();
+      const { guest, token } = await makeGuest();
+      const trip = await giveTrip(guest, status);
+
+      const res = await cancel(token, trip._id.toString());
+
+      expect(res.status).toBe(200);
+      expect((await Trip.findById(trip._id).lean()).status).toBe('cancelled');
+      const after = await Guest.findById(guest._id).lean();
+      expect(after.status).toBe('registered');
+      expect(after.currentTripId).toBeNull();
+    });
+  }
+
+  it('refuses once the guest has boarded', async () => {
+    await makeEventConfig();
+    const { guest, token } = await makeGuest();
+    const trip = await giveTrip(guest, 'boarded');
+
+    const res = await cancel(token, trip._id.toString());
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/already under way/i);
+    expect((await Trip.findById(trip._id).lean()).status).toBe('boarded');
+  });
+
+  it('retires their queued demand instead of requeueing it', async () => {
+    await makeEventConfig();
+    const { guest, token } = await makeGuest();
+    const trip = await giveTrip(guest, 'accepted');
+    const entry = await QueueEntry.create({
+      type: 'ON_DEMAND',
+      guestIds: [guest._id],
+      seats: 1,
+      luggage: 1,
+      pickup: { locationId: null, coordinates: toGeoPoint({ lat: 18.55, lng: 73.85 }), label: 'P' },
+      dropoff: { locationId: null, coordinates: toGeoPoint({ lat: 18.56, lng: 73.86 }), label: 'D' },
+      earliestAt: new Date(),
+      deadlineAt: new Date(Date.now() + 60 * 60_000),
+      enqueuedAt: new Date(),
+      priorityTier: 1,
+      status: 'assigned'
+    });
+
+    await cancel(token, trip._id.toString());
+
+    // Requeueing here would hand them a fresh driver moments after they asked
+    // to stop travelling.
+    const after = await QueueEntry.findById(entry._id).lean();
+    expect(after.status).toBe('failed');
+    expect(after.lastFailureReason).toBe('cancelled_by_guest');
+  });
+
+  it('will not let a guest cancel someone else\'s ride', async () => {
+    await makeEventConfig();
+    const { guest } = await makeGuest('Rider');
+    const { token: otherToken } = await makeGuest('Stranger');
+    const trip = await giveTrip(guest, 'accepted');
+
+    expect((await cancel(otherToken, trip._id.toString())).status).toBe(404);
+    expect((await Trip.findById(trip._id).lean()).status).toBe('accepted');
+  });
+
+  it('frees the driver so they can take another trip', async () => {
+    await makeEventConfig();
+    const { guest, token } = await makeGuest();
+    const { driver } = await makeDriver('Freed Driver');
+    const trip = await giveTrip(guest, 'accepted');
+    await Trip.updateOne({ _id: trip._id }, { $set: { driverId: driver._id } });
+    await Driver.updateOne({ _id: driver._id }, { $set: { status: 'assigned', currentTripId: trip._id } });
+
+    await cancel(token, trip._id.toString());
+
+    const after = await Driver.findById(driver._id).lean();
+    expect(after.currentTripId).toBeNull();
+    expect(after.status).toBe('idle');
   });
 });
 

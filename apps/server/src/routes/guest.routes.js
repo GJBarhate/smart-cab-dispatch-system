@@ -16,6 +16,9 @@ var _validate = require("../middleware/validate");
 var _auth = require("../middleware/auth");
 var _errors = require("../utils/errors");
 var _geo = require("../utils/geo");
+var _shared = require("../shared");
+var _TripService = require("../services/dispatch/TripService");
+var _NotificationService = require("../services/NotificationService");
 const guestRouter = (0, _express.Router)();
 exports.guestRouter = guestRouter;
 guestRouter.use(_auth.requireAuth, (0, _auth.requireRole)('guest'));
@@ -245,6 +248,78 @@ guestRouter.delete('/requests/:id', (0, _asyncHandler.asyncHandler)(async (req, 
   res.json({
     ok: true,
     data: request
+  });
+}));
+// A guest may call off a ride right up until they are in the vehicle. Once
+// `boarded` the driver is carrying them and only ops can intervene, so that
+// state is deliberately absent here even though the state machine permits the
+// transition.
+const GUEST_CANCELLABLE_STATUSES = ['pending_driver', 'accepted', 'en_route_pickup', 'at_pickup'];
+const cancelTripSchema = _zod.z.object({
+  reason: _zod.z.string().max(200).default('')
+});
+guestRouter.post('/trip/:id/cancel', (0, _validate.validate)({
+  body: cancelTripSchema
+}), (0, _asyncHandler.asyncHandler)(async (req, res) => {
+  const gid = guestId(req);
+  const trip = await _Trip.Trip.findOne({
+    _id: req.params.id,
+    'guests.guestId': gid
+  });
+  if (!trip) throw new _errors.NotFoundError('Trip');
+  if (!GUEST_CANCELLABLE_STATUSES.includes(trip.status)) {
+    throw new _errors.ConflictError(trip.status === 'boarded' ? 'Your ride is already under way — contact the help desk to stop it' : 'This ride can no longer be cancelled');
+  }
+
+  // Through the state machine, which also releases the driver back to the pool
+  // (plan.md §6.2) — a driver left holding a cancelled trip can never be
+  // assigned again.
+  const cancelled = await _TripService.TripService.transition(trip._id.toString(), 'cancelled', gid);
+  cancelled.cancellationReason = req.body.reason || 'Cancelled by guest';
+  cancelled.timeline.push({
+    at: new Date(),
+    type: 'cancelled',
+    actor: gid,
+    payload: {
+      by: 'guest',
+      reason: req.body.reason || ''
+    }
+  });
+  await cancelled.save();
+
+  // The guest asked to stop travelling, so their demand is retired rather than
+  // requeued — putting it back would hand them a new driver seconds later.
+  // Only this guest is stood down; a shared ride's other passengers keep theirs.
+  await _Guest.Guest.updateOne({
+    _id: gid
+  }, {
+    $set: {
+      status: _shared.GuestStatus.REGISTERED,
+      currentTripId: null
+    },
+    $unset: {
+      waitingSince: 1
+    }
+  });
+  await _QueueEntry.QueueEntry.updateMany({
+    guestIds: gid,
+    status: {
+      $in: ['waiting', 'matching', 'assigned']
+    }
+  }, {
+    $set: {
+      status: 'failed',
+      lastFailureReason: 'cancelled_by_guest'
+    }
+  });
+  _NotificationService.NotificationService.tripStatus(cancelled._id.toString(), {
+    tripId: cancelled._id.toString(),
+    status: 'cancelled',
+    at: new Date().toISOString()
+  });
+  res.json({
+    ok: true,
+    data: cancelled
   });
 }));
 const pushSubscribeSchema = _zod.z.object({

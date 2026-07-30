@@ -87,6 +87,34 @@ export default function Request() {
   }), [queryClient]));
   const [cancelling, setCancelling] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [cancelTripOpen, setCancelTripOpen] = useState(false);
+  const [cancellingTrip, setCancellingTrip] = useState(false);
+  const [cancelError, setCancelError] = useState(null);
+  async function handleCancelTrip(tripId) {
+    setCancellingTrip(true);
+    setCancelError(null);
+    try {
+      await guestApi.cancelTrip(tripId);
+      setActiveRequestId(null);
+      setCancelTripOpen(false);
+      queryClient.invalidateQueries({
+        queryKey: guestKeys.tripCurrent
+      });
+      queryClient.invalidateQueries({
+        queryKey: guestKeys.me
+      });
+    } catch (err) {
+      // Most likely the driver picked them up while the dialog was open — the
+      // message says so, and the refresh flips the screen to the boarded state.
+      setCancelError(err instanceof ApiError ? err.message : 'Could not cancel your ride. Please try again.');
+      setCancelTripOpen(false);
+      queryClient.invalidateQueries({
+        queryKey: guestKeys.tripCurrent
+      });
+    } finally {
+      setCancellingTrip(false);
+    }
+  }
   async function handleCancel() {
     if (!activeRequestId) return;
     setCancelling(true);
@@ -111,6 +139,16 @@ export default function Request() {
       return () => clearTimeout(t);
     }
   }, [pendingQuery.data, setActiveRequestId]);
+
+  // The stored id is a local convenience pointer, not a source of truth, and it
+  // can outlive the request it names — the row was purged, or the database was
+  // rebuilt while this browser kept the id. A 404 means exactly that, so drop
+  // the pointer instead of leaving the tab stuck on "Request not found" with no
+  // route back to the booking form.
+  const requestMissing = pendingQuery.error instanceof ApiError && pendingQuery.error.status === 404;
+  useEffect(() => {
+    if (requestMissing) setActiveRequestId(null);
+  }, [requestMissing, setActiveRequestId]);
   if (activeRequestId && pendingQuery.isLoading) {
     return <div className="p-4">
         <ListSkeleton rows={1} />
@@ -122,7 +160,9 @@ export default function Request() {
         <ConfirmDialog open={cancelConfirmOpen} title="Cancel this request?" message="You'll lose your place and will need to submit a new request if you still need a ride." confirmLabel="Cancel request" danger loading={cancelling} onConfirm={handleCancel} onCancel={() => setCancelConfirmOpen(false)} />
       </div>;
   }
-  if (activeRequestId && pendingQuery.error) {
+  // Only real failures get the error screen. A 404 is handled above by dropping
+  // the stale pointer and falling through to the live ride or the form.
+  if (activeRequestId && pendingQuery.error && !requestMissing) {
     return <div className="p-4">
         <ErrorState error={pendingQuery.error} onRetry={() => pendingQuery.refetch()} />
       </div>;
@@ -137,8 +177,17 @@ export default function Request() {
   // offered a booking the API refuses with a 409, so the only way to find out
   // was to fill it in and submit.
   if (isTripActive(tripResp?.trip)) {
-    return <div className="p-4">
-        <EmptyState icon={CarFront} title="You already have a ride on the way" subtitle={`${TRIP_STATUS_LABEL[tripResp.trip.status] ?? 'In progress'} · ${tripResp.trip.code}`} action={<Button onClick={() => navigate('/track')}>Track my ride</Button>} />
+    const trip = tripResp.trip;
+    // Once boarded the guest is in the vehicle and the API refuses to cancel,
+    // so the button is not offered — showing it would only produce a 409.
+    const canCancel = trip.status !== 'boarded';
+    return <div className="space-y-3 p-4">
+        <EmptyState icon={CarFront} title="You already have a ride on the way" subtitle={`${TRIP_STATUS_LABEL[trip.status] ?? 'In progress'} · ${trip.code}`} action={<Button onClick={() => navigate('/track')}>Track my ride</Button>} />
+        {cancelError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{cancelError}</p>}
+        {canCancel && <Button variant="danger" fullWidth loading={cancellingTrip} onClick={() => setCancelTripOpen(true)}>
+            Cancel this ride
+          </Button>}
+        <ConfirmDialog open={cancelTripOpen} title="Cancel this ride?" message="Your driver will be released to another guest. You'll need to request a new ride if you still need one." confirmLabel="Cancel ride" danger loading={cancellingTrip} onConfirm={() => handleCancelTrip(trip.id)} onCancel={() => setCancelTripOpen(false)} />
       </div>;
   }
   return <RequestForm guestGroupSize={guest?.groupSize ?? 1} guestLuggage={guest?.luggageCount ?? 1} accommodationId={guest?.accommodationId?.id} />;

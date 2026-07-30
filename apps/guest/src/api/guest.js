@@ -7,6 +7,9 @@ export const guestApi = {
   createRequest: body => apiClient.post('/api/guest/requests', body),
   getRequest: id => apiClient.get(`/api/guest/requests/${id}`),
   cancelRequest: id => apiClient.delete(`/api/guest/requests/${id}`),
+  cancelTrip: (id, reason = '') => apiClient.post(`/api/guest/trip/${id}/cancel`, {
+    reason
+  }),
   pushSubscribe: subscription => apiClient.post('/api/guest/push/subscribe', {
     subscription
   }),
